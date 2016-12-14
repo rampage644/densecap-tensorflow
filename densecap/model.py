@@ -55,3 +55,59 @@ class VGG16(object):
             self.layers[name] = value
         self.predicted = tf.nn.softmax(value)
 
+
+class RegionProposalNetwork(object):
+    def __init__(self, conv_layer, anchor_centers):
+        self.boxes = [
+            (100, 100)
+        ]  # one box only, k=1
+        ha, wa = tf.constant(100, dtype=tf.float32), tf.constant(100, dtype=tf.float32)
+        self.anchor_centers = tf.constant(anchor_centers, tf.float32)  # H' x W' x 2, 2 = (Xa, Ya)
+
+        self.input = conv_layer  # should be (N, H', W', C) tensor
+        self.boxes_num = len(self.boxes)  # k in paper
+        self.filters_num = 256
+        self.ksize = [3, 3]
+
+        self.layers = {}
+        self._build()
+
+    def _build(self):
+        conv = tf.contrib.layers.conv2d(
+            self.input,
+            self.filters_num,
+            self.ksize,
+            scope='conv6_1'
+        )
+        self.layers['conv6_1'] = conv
+
+        offsets = tf.contrib.layers.conv2d(
+            conv,
+            4 * self.boxes_num,
+            [1] * 2,
+            scope='offsets'
+        )  # N x H' x W' x 4k
+        self.layers['offsets'] = offsets
+
+        scores = tf.contrib.layers.conv2d(
+            conv,
+            1 * self.boxes_num,
+            [1] * 2,
+            scope='scores'
+        )  # N x H' x W' x k
+        self.layers['scores'] = scores
+
+        tx = offsets[:, :, :, 0]  # tx
+        ty = offsets[:, :, :, 1]  # ty
+        th = offsets[:, :, :, 2]  # th
+        tw = offsets[:, :, :, 3]  # tw
+
+        x = self.anchor_centers[:, :, :, 0] + tx * wa
+        y = self.anchor_centers[:, :, :, 1] + ty * ha
+        w = wa * tf.exp(tw)
+        h = ha * tf.exp(th)
+
+
+
+
+
