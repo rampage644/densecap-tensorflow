@@ -106,8 +106,3 @@ class RegionProposalNetwork(object):
         y = self.anchor_centers[:, :, :, 1] + ty * ha
         w = wa * tf.exp(tw)
         h = ha * tf.exp(th)
-
-
-
-
-
