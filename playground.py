@@ -55,34 +55,45 @@ def run():
     return res
 
 offsets, scores = run()
-
-#%%
-
+scores.shape
 
 
 #%%
-def f(output, ksize, stride):
-    return (output - 1) * stride + ksize
+tf.reset_default_graph()
+filename = '101310-of-108064'
 
-#%%
-o = 1
 
-o = f(o, 3, 1)  # conv5_3 -> conv5_2, 3
-o = f(o, 3, 1)  # conv5_3 -> conv5_1, 5
-o = f(o, 2, 2)  # conv5_3 -> pool4, 10
-o = f(o, 3, 1)  # conv5_3 -> conv4_3, 12
-o = f(o, 3, 1)  # conv5_3 -> conv4_2, 14
-o = f(o, 3, 1)  # conv5_3 -> conv4_1, 16
-o = f(o, 2, 2)  # conv5_3 -> pool3, 32
-o = f(o, 3, 1)  # conv5_3 -> conv3_3, 34
-o = f(o, 3, 1)  # conv5_3 -> conv3_2, 36
-o = f(o, 3, 1)  # conv5_3 -> conv3_1, 38
-o = f(o, 2, 2)  # conv5_3 -> pool2, 76
-o = f(o, 3, 1)  # conv5_3 -> conv2_2, 78
-o = f(o, 3, 1)  # conv5_3 -> conv2_1, 80
-o = f(o, 2, 2)  # conv5_3 -> pool1, 160
-o = f(o, 3, 1)  # conv5_3 -> conv1_2, 162
-o = f(o, 3, 1)  # conv5_3 -> conv1_1, 164
-o = f(o, 3, 1)  # conv5_3 -> source, 166
 
-print(o)
+with tf.Session() as sess:
+    coord = tf.train.Coordinator()
+    f_queue = tf.train.string_input_producer([filename])
+
+    reader = tf.TFRecordReader()
+    k, v = reader.read(f_queue)
+    feats = tf.parse_single_example(v, features={
+        'image/height': tf.FixedLenFeature([], tf.int64),
+        'image/width': tf.FixedLenFeature([], tf.int64),
+        'image/bbox/x': tf.VarLenFeature(tf.float32),
+        'image/bbox/y': tf.VarLenFeature(tf.float32),
+        'image/bbox/width': tf.VarLenFeature(tf.float32),
+        'image/bbox/height': tf.VarLenFeature(tf.float32),
+        'image/encoded': tf.FixedLenFeature([], tf.string)
+    })
+    H, W = feats['image/height'], feats['image/width']
+    H, W = tf.cast(H, tf.int64), tf.cast(W, tf.int64)
+
+    image = tf.decode_raw(feats['image/encoded'], tf.uint8)
+    image = tf.reshape(image, tf.pack([W, H, 3]))
+
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+    print(H.eval())
+    print(W.eval())
+    img = image.eval()
+
+    coord.request_stop()
+    coord.join(threads)
+
+    # image = tf.decode_raw(feats['image/encoded'], tf.uint8)
+    # image.set_shape([W.eval(), H.eval()])
+
