@@ -1,5 +1,6 @@
 #%%
 import tensorflow as tf
+import matplotlib.pyplot as plt
 import numpy as np
 import densecap.model
 import importlib
@@ -60,7 +61,8 @@ scores.shape
 
 #%%
 tf.reset_default_graph()
-filename = '101310-of-108064'
+# filename = '101310-of-108064'
+filename = '00000-of-00010'
 
 
 
@@ -71,6 +73,7 @@ with tf.Session() as sess:
     reader = tf.TFRecordReader()
     k, v = reader.read(f_queue)
     feats = tf.parse_single_example(v, features={
+        'image/filename': tf.FixedLenFeature([], tf.string),
         'image/height': tf.FixedLenFeature([], tf.int64),
         'image/width': tf.FixedLenFeature([], tf.int64),
         'image/bbox/x': tf.VarLenFeature(tf.float32),
@@ -80,20 +83,42 @@ with tf.Session() as sess:
         'image/encoded': tf.FixedLenFeature([], tf.string)
     })
     H, W = feats['image/height'], feats['image/width']
-    H, W = tf.cast(H, tf.int64), tf.cast(W, tf.int64)
+    H, W = tf.cast(H, tf.float32), tf.cast(W, tf.float32)
 
-    image = tf.decode_raw(feats['image/encoded'], tf.uint8)
-    image = tf.reshape(image, tf.pack([W, H, 3]))
+    image = feats['image/encoded']
+    image = tf.image.decode_jpeg(image, channels=3)
 
+    filename = feats['image/filename']
+    filename = tf.decode_raw(filename, tf.uint8)
+
+    bbox_xmin, bbox_ymin = feats['image/bbox/x'].values, feats['image/bbox/y'].values
+    bbox_w, bbox_h = feats['image/bbox/width'].values, feats['image/bbox/height'].values
+
+    bbox_xmax = bbox_xmin + bbox_w
+    bbox_ymax = bbox_ymin + bbox_h
+
+    bbox_xmin, bbox_xmax = bbox_xmin / W, bbox_xmax / W
+    bbox_ymin, bbox_ymax = bbox_ymin / H, bbox_ymax / H
+
+    boxes = tf.stack([bbox_ymin, bbox_xmin, bbox_ymax, bbox_xmax], axis=1)
+
+    images = tf.image.draw_bounding_boxes(
+        tf.expand_dims(tf.cast(image, tf.float32), axis=0), tf.expand_dims(boxes, axis=0))
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-    print(H.eval())
-    print(W.eval())
-    img = image.eval()
+    img, imgs, H, W, filename = sess.run([
+        image, images, H, W, filename])
 
     coord.request_stop()
     coord.join(threads)
 
-    # image = tf.decode_raw(feats['image/encoded'], tf.uint8)
-    # image.set_shape([W.eval(), H.eval()])
+
+print(filename.tobytes().decode('utf-8'))
+print(H, W)
+print(img.shape)
+plt.figure(figsize=(12, 12))
+plt.subplot(211); plt.imshow(img)
+plt.subplot(212); plt.imshow(imgs.astype(np.uint8)[0])
+plt.show()
+
 
