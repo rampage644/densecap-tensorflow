@@ -1,3 +1,4 @@
+# pylint: disable=c0103
 #%%
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ import collections
 
 
 import imagenet_classes
+import densecap.util as util
 #%%
 tf.reset_default_graph()
 importlib.reload(densecap.model)
@@ -121,4 +123,59 @@ plt.subplot(211); plt.imshow(img)
 plt.subplot(212); plt.imshow(imgs.astype(np.uint8)[0])
 plt.show()
 
+
+#%%
+importlib.reload(util)
+d = 4
+
+#%%
+H, W = 100, 100
+sh, sw = 10, 10
+
+N = (H / sh) * (W / sw)
+M = 2
+
+
+regions = np.dstack(
+    np.meshgrid(np.arange(0, H, sh), np.arange(0, W, sw).reshape(-1, 2))
+)
+sizes = np.tile(np.expand_dims(np.array([10, 10]), 0), [H, 1])
+regions = regions.reshape(-1, 2)
+
+np_proposals = np.hstack((regions, sizes))
+
+np_gt = np.array([[50, 50, 10, 10], [0, 0, 20, 20]])
+
+
+#%%
+proposals = tf.Variable(np_proposals, dtype=tf.float32)
+gt = tf.Variable(np_gt, dtype=tf.float32)
+
+print(proposals.get_shape(), gt.get_shape())
+
+proposals = tf.expand_dims(proposals, axis=1)
+proposals = tf.tile(proposals, [1, M, 1])
+
+gt = tf.expand_dims(gt, axis=0)
+gt = tf.tile(gt, [N, 1, 1])
+
+proposals = tf.reshape(proposals, (N*M, d))
+gt = tf.reshape(gt, (N*M, d))
+
+a = tf.stack([gt, gt], axis=1)
+print(a.get_shape())
+
+
+def iou(x):
+    # x is 2x4 tensor
+    return util.tf_iou(x[0], x[1])
+
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    res = tf.map_fn(iou, a)
+
+    result = sess.run(res)
+
+result.reshape((N, M))
 
