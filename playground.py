@@ -11,6 +11,7 @@ import collections
 
 import imagenet_classes
 import densecap.util as util
+import densecap.model as model
 #%%
 tf.reset_default_graph()
 importlib.reload(densecap.model)
@@ -132,7 +133,7 @@ d = 4
 H, W = 100, 100
 sh, sw = 10, 10
 
-N = (H / sh) * (W / sw)
+N = (H // sh) * (W // sw)
 M = 2
 
 
@@ -142,9 +143,9 @@ regions = np.dstack(
 sizes = np.tile(np.expand_dims(np.array([10, 10]), 0), [H, 1])
 regions = regions.reshape(-1, 2)
 
-np_proposals = np.hstack((regions, sizes))
+np_proposals = np.hstack((regions, sizes)).astype(np.float)
 
-np_gt = np.array([[50, 50, 10, 10], [0, 0, 20, 20]])
+np_gt = np.array([[50, 50, 10, 10], [0, 0, 20, 20]]).astype(np.float)
 
 
 #%%
@@ -162,20 +163,88 @@ gt = tf.tile(gt, [N, 1, 1])
 proposals = tf.reshape(proposals, (N*M, d))
 gt = tf.reshape(gt, (N*M, d))
 
-a = tf.stack([gt, gt], axis=1)
+a = tf.stack([proposals, gt], axis=1)
 print(a.get_shape())
-
 
 def iou(x):
     # x is 2x4 tensor
     return util.tf_iou(x[0], x[1])
 
 
+res = tf.map_fn(iou, a)
+
+#%%
+options = tf.cast(tf.Variable(np.random.rand(10, 3)), tf.float32)
+scores = tf.cast(tf.Variable(np.radom.rand(10)), tf.float32)
+zeros = tf.zeros(options.get_shape().as_list())
+ones = tf.ones(options.get_shape().as_list())
+options_1 = tf.reduce_sum(tf.select(tf.greater(options, 0.7), options, zeros), axis=1)
+positive_mask = tf.greater(options_1, 0)
+
+# change threshold to 0.3 as in paper
+options_2 = tf.reduce_sum(tf.select(tf.less(options, 0.7), zeros, options), axis=1)
+negative_mask = tf.equal(options_2, 0)
+
+
+positive_boxes = tf.boolean_mask(options, positive_mask)
+negative_boxes = tf.boolean_mask(options, negative_mask)
+
+positive_scores = tf.boolean_mask(scores, positive_mask)
+negative_scores = tf.boolean_mask(scores, negative_mask)
+
+
+
+#%%
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
-    res = tf.map_fn(iou, a)
+    base, res1, res2 = sess.run([options, indices_1, indices_2])
 
-    result = sess.run(res)
+print(base)
+print(res1)
+print(res2)
 
-result.reshape((N, M))
 
+#%%
+# generate anchor_centers from boxes and given prev conv_layer
+H, W = 224, 224
+N, Hp, Wp, C = 10, 14, 14, 64  # batch, height, width, filters
+k = 12  # boxes num
+boxes = tf.Variable([
+    (45, 90), (90, 45), (64, 64),
+    (90, 180), (180, 90), (128, 128),
+    (181, 362), (362, 181), (256, 256),
+    (362, 724), (724, 362), (512, 512),
+], dtype=tf.float32)
+conv_layer = tf.constant(np.random.rand(N, Hp, Wp, C), dtype=tf.float32)
+
+# those are strides in terms of original image
+# i.e. what x and y base image strides corresponds to 1,1 conv layer stride
+sh, sw = H // Hp, W // Wp
+
+grid = tf.Variable(
+    np.dstack(np.meshgrid(np.arange(-0.5, H - 0.5, sh), np.arange(-0.5, W - 0.5, sw))),
+    dtype=tf.float32
+)
+
+# grid = tf.reshape(grid, [Hp * Wp, 2])
+boxes = tf.expand_dims(tf.expand_dims(boxes, 0), 0)
+grid = tf.expand_dims(grid, 2)
+
+boxes.get_shape(), grid.get_shape()
+tf.tile(boxes, [Hp * Wp, 1])
+tf.tile(grid, [k, 1])
+
+anchor_centers = tf.concat(3, [tf.tile(grid, [1, 1, k, 1]), tf.tile(boxes, [Hp, Wp, 1, 1])])
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    result = sess.run(anchor_centers)
+
+result[0][0]
+
+#%%
+importlib.reload(model)
+
+tf.reset_default_graph()
+vgg16 = model.VGG16(224, 224)
+rpn = model.RegionProposalNetwork(vgg16.layers['conv5_3'], 224, 224)
