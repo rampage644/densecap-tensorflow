@@ -152,17 +152,16 @@ class RegionProposalNetwork(object):
 
         # here we take either iou value if it greater than threshold
         # or zero. We sum over all options. Sample is considered
-        # positive if it has IoU with _any_ ground truth boxes, so
-        # we check if sum is greater than threshold
-        options_1 = tf.reduce_sum(tf.select(tf.greater(iou_metric, 0.7), iou_metric, zeros), axis=1)
-        positive_mask = tf.greater(options_1, 0)
+        # positive if it has IoU with _any_ ground truth boxes
+        # we will need that for calculating ground truch box params and loss
+        mask = tf.greater(iou_metric, 0.7)
+        positive_mask = tf.reduce_any(mask, axis=1)
 
         # here we compare iou metric with another threshold. Sample
         # would be considered negative if _all_ ground truch boxes
-        # have iou less than threshold. We mark those with zeros.
-        # We need to find those where sum is equal to zero.
-        options_2 = tf.reduce_sum(tf.select(tf.less(iou_metric, 0.3), zeros, iou_metric), axis=1)
-        negative_mask = tf.equal(options_2, 0)
+        # have iou less than threshold
+        neg_mask = tf.less(iou_metric, 0.3)
+        negative_mask = tf.reduce_all(neg_mask, axis=1)
 
         positive_boxes = tf.boolean_mask(orig_proposals, positive_mask)
         negative_boxes = tf.boolean_mask(orig_proposals, negative_mask)
