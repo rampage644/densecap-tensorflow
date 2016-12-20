@@ -46,7 +46,7 @@ class VGG16(object):
                     scope=name
                 )
                 self.layers[name] = value
-            value = tf.nn.max_pool(value, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+            value = tf.nn.max_pool(value, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='VALID')
             self.layers['pool{}'.format(idx+1)] = value
 
 
