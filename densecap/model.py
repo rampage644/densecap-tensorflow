@@ -85,6 +85,7 @@ class RegionProposalNetwork(object):
         # TODO: parametrize
         self.learning_rate = 0.001
         self.batch_size = 256
+        self.l1_coef = 10.0
 
         self.layers = {}
         self._build()
@@ -92,13 +93,15 @@ class RegionProposalNetwork(object):
         self._create_train()
 
     def _create_loss(self):
-        logit_loss = tf.reduce_sum(
+        score_loss = tf.reduce_sum(
             self.pos_scores * tf.log(self.pos_scores) +
-            self.pos_scores * tf.log(self.pos_scores)
+            (1 - self.pos_scores) * tf.log(1 - self.pos_scores) +
+            self.neg_scores * tf.log(self.neg_scores) +
+            (1 - self.neg_scores) * tf.log(1 - self.neg_scores)
         ) / self.batch_size
         # TODO: implement
         box_reg_loss = 0.0
-        self.loss = logit_loss + box_reg_loss
+        self.loss = score_loss + self.l1_coef * box_reg_loss
 
     def _create_train(self):
         self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
