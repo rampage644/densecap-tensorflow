@@ -78,18 +78,17 @@ class RegionProposalNetwork(object):
         self._create_train()
 
     def _create_loss(self):
+        scores = tf.concat(0, [self.pos_scores, self.neg_scores])
         score_loss = tf.reduce_sum(
-            self.pos_scores * tf.log(self.pos_scores) +
-            (1 - self.pos_scores) * tf.log(1 - self.pos_scores) +
-            self.neg_scores * tf.log(self.neg_scores) +
-            (1 - self.neg_scores) * tf.log(1 - self.neg_scores)
-        ) / self.batch_size
+            scores * tf.log(scores) + (1 - scores) * tf.log(1 - scores)
+        )
+
         box_reg_loss = self._box_params_loss(
             self.gt,
             tf.reshape(self.anchor_centers, [-1, 4]),
             self.pos_sample_mask, self.offsets
         )
-        self.loss = score_loss + self.l1_coef * box_reg_loss
+        self.loss = tf.add(score_loss, tf.mul(self.l1_coef, box_reg_loss, name='box_loss_lambda'), name='total_loss')
 
     def _create_train(self):
         self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
@@ -100,10 +99,10 @@ class RegionProposalNetwork(object):
         Hp, Wp = self.Hp, self.Wp
         self._generate_anchor_centers(self.H, self.W, Hp, Wp)
 
-        self.offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4])
+        self.offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4], name='1')
         proposals = self._generate_proposals(self.offsets, Hp, Wp)
         # XXX: replace sigmoid with logits once scores are 2 numbers instead of 1
-        scores = tf.reshape(tf.sigmoid(self.layers['scores']), [Hp * Wp * self.k, 1])
+        scores = tf.reshape(tf.sigmoid(self.layers['scores']), [Hp * Wp * self.k, 1], name='2')
 
         # TODO: implement cross-boundary filetering
         proposals, scores = self._cross_border_filter(proposals, scores)
@@ -112,14 +111,12 @@ class RegionProposalNetwork(object):
         self.gt = tf.placeholder(tf.float32, [self.batch_size // 4, 4])  # M ground truth boxes
         pos_batch, neg_batch = self._generate_batches(proposals, self.gt, scores)
 
-        self.pos_scores, self.pos_boxes = pos_batch
-        self.neg_scores, self.neg_boxes = neg_batch
+        self.pos_boxes, self.pos_scores = pos_batch
+        self.neg_boxes, self.neg_scores = neg_batch
 
     def _generate_batches(self, proposals, gt, scores):
-        N, d1 = proposals.get_shape().as_list()
-        M, d2 = gt.get_shape().as_list()
-        assert d1 == d2, 'Wrong proposal/ground truth boxes shape.'
-        d = d1
+        N = self.Hp * self.Wp * self.k
+        M, d = gt.get_shape().as_list()
 
         orig_proposals = proposals
         proposals = tf.expand_dims(proposals, axis=1)
@@ -128,17 +125,15 @@ class RegionProposalNetwork(object):
         gt = tf.expand_dims(gt, axis=0)
         gt = tf.tile(gt, [N, 1, 1])
 
-        proposals = tf.reshape(proposals, (N*M, d))
-        gt = tf.reshape(gt, (N*M, d))
+        proposals = tf.reshape(proposals, (N*M, d), name='3')
+        gt = tf.reshape(gt, (N*M, d), name='4')
 
         # shape is N*M x 1
         # TODO: speed up (!)
         iou_metric = tf.map_fn(iou, tf.stack([proposals, gt], axis=1))
-        iou_metric = tf.reshape(iou_metric, [N, M])
+        iou_metric = tf.reshape(iou_metric, [N, M], name='5')
 
         # now let's get rid of non-positive and non-negative samples
-        zeros = tf.zeros(iou_metric.get_shape().as_list())
-
         # here we take either iou value if it greater than threshold
         # or zero. We sum over all options. Sample is considered
         # positive if it has IoU with _any_ ground truth boxes
@@ -162,11 +157,21 @@ class RegionProposalNetwork(object):
         B = self.batch_size // 2
         # pad positive samples with negative if there are not enough
         # TODO: shuffle? random sampling?
-        postitve_boxes = tf.slice(tf.concat(0, [positive_boxes, negative_boxes]), [0, 0], [B, -1])
-        postitve_scores = tf.slice(tf.concat(0, [positive_scores, negative_scores]), [0, 0], [B, -1])
+        postitve_boxes = tf.slice(
+            tf.concat(0, [positive_boxes, negative_boxes]), [0, 0], [B, -1],
+            name='pos_box_slice'
+        )
+        postitve_scores = tf.slice(
+            tf.concat(0, [positive_scores, negative_scores]), [0, 0], [B, -1],
+            name='pos_score_slice'
+        )
 
-        negative_boxes = tf.slice(negative_boxes, [0, 0], [B, -1])
-        negative_scores = tf.slice(negative_scores, [0, 0], [B, -1])
+        negative_boxes = tf.slice(
+            negative_boxes, [0, 0], [B, -1], name='neg_box_slice'
+        )
+        negative_scores = tf.slice(
+            negative_scores, [0, 0], [B, -1], name='neg_score_slice'
+        )
 
         return (
             (positive_boxes, positive_scores),
@@ -180,19 +185,19 @@ class RegionProposalNetwork(object):
         # each shape is Hp x Wp x k
         xa, ya, wa, ha = tf.unstack(self.anchor_centers, axis=3)
 
-        x = xa + tx * wa
-        y = ya + ty * ha
-        w = wa * tf.exp(tw)
-        h = ha * tf.exp(th)
+        x = tf.add(xa, tf.mul(tx, wa, name='tx_times_wa'), name='xa_plus_tx_times_wa')
+        y = tf.add(ya, tf.mul(ty, ha, name='ty_times_ha'), name='ya_plus_ty_times_ha')
+        w = tf.mul(wa, tf.exp(tw), name='wa_times_exp_tw_')
+        h = tf.mul(ha, tf.exp(th), name='ha_times_exp_th_')
 
         # shape is Hp*Wp*k x 4
         proposals = tf.stack([x, y, w, h], axis=3)
         # XXX: replace explicit shape with `-1`
-        proposals = tf.reshape(proposals, [Hp * Wp * self.k, 4])
+        proposals = tf.reshape(proposals, [Hp * Wp * self.k, 4], name='6')
         return proposals
 
     def _box_params_loss(self, ground_truth, anchor_centers, pos_sample_mask, offsets):
-        N, _ = anchor_centers.get_shape().as_list()
+        N = self.Wp * self.Hp * self.k
         M, _ = ground_truth.get_shape().as_list()
         print('M = ', M, 'N = ', N)
         # ground_truth shape is M x 4, where M is count and 4 are x,y,w,h
@@ -217,16 +222,15 @@ class RegionProposalNetwork(object):
         # to filter out non-positive samples and sum to one
 
         # each shape is N x M
-        tx = (x - xa) / wa
-        print('gt tx.shape', tx.get_shape())
-        ty = (y - ya) / ha
-        tw = tf.log(w / wa)
-        th = tf.log(h / ha)
+        tx = tf.div(tf.sub(x, xa, name='x_-_xa'), wa, name='x_minus_xa_div_wa')
+        ty = tf.div(tf.sub(y, ya, name='y_minus_ya'), ha, name='y_minus_ya_div_ha')
+        tw = tf.log(tf.div(w, wa, name='w_div_wa'))
+        th = tf.log(tf.div(h, ha, name='h_div_ha'))
 
         gt_params = tf.stack([tx, ty, tw, th], axis=2)
         print('gt_params.shape', gt_params.get_shape())
 
-        offsets = tf.expand_dims(tf.reshape(offsets, [N, 4]), axis=1)
+        offsets = tf.expand_dims(tf.reshape(offsets, [N, 4], name='7'), axis=1)
         offsets = tf.tile(offsets, [1, M, 1])
         print('offsets.shape', offsets.get_shape())
 
@@ -269,13 +273,14 @@ class RegionProposalNetwork(object):
     def _generate_anchor_centers(self, H, W, Hp, Wp):
         # those are strides in terms of original image
         # i.e. what x and y base image strides corresponds to 1,1 conv layer stride
-        sh, sw = H // Hp, W // Wp
+        # XXX: check for Hp Wp everywhere!!
+        sh, sw = 16, 16
+        H, W = tf.cast(H, tf.float32), tf.cast(W, tf.float32)
 
         # TODO: probably replace `numpy` ops with tf ones
-        grid = tf.constant(
-            np.dstack(np.meshgrid(np.arange(-0.5, H - 0.5, sh), np.arange(-0.5, W - 0.5, sw))),
-            dtype=tf.float32
-        )
+        grid = tf.stack(tf.meshgrid(
+                tf.linspace(-0.5, H - 0.5, Wp),
+                tf.linspace(-0.5, W - 0.5, Hp)), axis=2)
 
         # convert boxes from K x 2 to 1 x 1 x K x 2
         boxes = tf.expand_dims(tf.expand_dims(self.boxes, 0), 0)
