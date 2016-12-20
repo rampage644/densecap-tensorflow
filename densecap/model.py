@@ -27,20 +27,14 @@ class VGG16(object):
         (3, 512),
         (3, 512),
     ]
-    flatten_dim = 7 * 7 * 512
-    fully_c = [
-        (4096),
-        (4096),
-        (1000)
-    ]
-    # TODO: insert into pipeline: preprocess image
     mean_pixel = [103.939, 116.779, 123.68]
 
-    def __init__(self, height, width):
+    def __init__(self, input_images):
         self.layers = {}
-        self.input = tf.placeholder(tf.float32, [None, height, width, 3])
+        self.input = input_images
 
         value = self.input
+        value -= self.mean_pixel
 
         for idx, (layers, filters) in enumerate(self.pools):
             for layer in range(layers):
@@ -54,17 +48,6 @@ class VGG16(object):
                 self.layers[name] = value
             value = tf.nn.max_pool(value, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
             self.layers['pool{}'.format(idx+1)] = value
-
-        value = tf.reshape(value, [-1, self.flatten_dim])
-        for idx, num_outputs in enumerate(self.fully_c, start=len(self.pools)):
-            name = 'fc{}'.format(idx+1)
-            value = tf.contrib.layers.fully_connected(
-                value,
-                num_outputs,
-                scope=name
-            )
-            self.layers[name] = value
-        self.predicted = tf.nn.softmax(value)
 
 
 class RegionProposalNetwork(object):
