@@ -100,7 +100,11 @@ class RegionProposalNetwork(object):
             (1 - self.neg_scores) * tf.log(1 - self.neg_scores)
         ) / self.batch_size
         # TODO: implement
-        box_reg_loss = 0.0
+        box_reg_loss = self._box_params_loss(
+            self.gt,
+            tf.reshape(self.anchor_centers, [-1, 4]),
+            self.pos_sample_mask, self.offsets
+        )
         self.loss = score_loss + self.l1_coef * box_reg_loss
 
     def _create_train(self):
@@ -112,9 +116,10 @@ class RegionProposalNetwork(object):
         _, Hp, Wp, _ = self.layers['conv6_1'].get_shape().as_list()
         self._generate_anchor_centers(self.H, self.W, Hp, Wp)
 
-        offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4])
-        proposals = self._generate_proposals(offsets, Hp, Wp)
-        scores = tf.reshape(self.layers['scores'], [Hp * Wp * self.k, 1])
+        self.offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4])
+        proposals = self._generate_proposals(self.offsets, Hp, Wp)
+        # XXX: replace sigmoid with logits once scores are 2 numbers instead of 1
+        scores = tf.reshape(tf.sigmoid(self.layers['scores']), [Hp * Wp * self.k, 1])
 
         # TODO: implement cross-boundary filetering
         proposals, scores = self._cross_border_filter(proposals, scores)
@@ -155,6 +160,7 @@ class RegionProposalNetwork(object):
         # positive if it has IoU with _any_ ground truth boxes
         # we will need that for calculating ground truch box params and loss
         mask = tf.greater(iou_metric, 0.7)
+        self.pos_sample_mask = mask
         positive_mask = tf.reduce_any(mask, axis=1)
 
         # here we compare iou metric with another threshold. Sample
@@ -185,21 +191,10 @@ class RegionProposalNetwork(object):
 
 
     def _generate_proposals(self, offsets, Hp, Wp):
-        # XXX: consider using tf.split instead
-        # XXX: check height and width indices
         # each shape is Hp x Wp x k
-        tx = offsets[:, :, :, 0]  # tx
-        ty = offsets[:, :, :, 1]  # ty
-        th = offsets[:, :, :, 2]  # th
-        tw = offsets[:, :, :, 3]  # tw
-
-        # XXX: consider using tf.split instead
-        # XXX: check height and width indices
+        tx, ty, tw, th = tf.unstack(offsets, axis=3)
         # each shape is Hp x Wp x k
-        xa = self.anchor_centers[:, :, :, 0]
-        ya = self.anchor_centers[:, :, :, 1]
-        ha = self.anchor_centers[:, :, :, 2]
-        wa = self.anchor_centers[:, :, :, 3]
+        xa, ya, wa, ha = tf.unstack(self.anchor_centers, axis=3)
 
         x = xa + tx * wa
         y = ya + ty * ha
@@ -211,6 +206,47 @@ class RegionProposalNetwork(object):
         proposals = tf.reshape(proposals, [Hp * Wp * self.k, 4])
         return proposals
 
+    def _box_params_loss(self, ground_truth, anchor_centers, pos_sample_mask, offsets):
+        N, _ = anchor_centers.get_shape().as_list()
+        M, _ = ground_truth.get_shape().as_list()
+        print('M = ', M, 'N = ', N)
+        # ground_truth shape is M x 4, where M is count and 4 are x,y,w,h
+        gt = tf.expand_dims(ground_truth, axis=0)
+        gt = tf.tile(gt, [N, 1, 1])
+        print('gt.shape', gt.get_shape())
+        # anchor_centers shape is N x 4 where N is count and 4 are xa,ya,wa,ha
+        anchor_centers = tf.expand_dims(anchor_centers, axis=1)
+        anchor_centers = tf.tile(anchor_centers, [1, M, 1])
+        print('anchor_centers.shape', anchor_centers.get_shape())
+        # pos_sample_mask shape is N x M, True are for positive proposals
+        mask = tf.expand_dims(tf.cast(pos_sample_mask, tf.float32), axis=2)
+        print('mask.shape', mask.get_shape())
+
+        xa, ya, wa, ha = tf.unstack(anchor_centers, axis=2)
+        print('anchor_centers xa.shape', xa.get_shape())
+        x, y, w, h = tf.unstack(gt, axis=2)
+        print('gt x.shape', x.get_shape())
+
+        # idea is to calculate N x M tx, ty, tw, th for ground truth boxes
+        # for every proposal. Then we caclulate loss, multiply it with mask
+        # to filter out non-positive samples and sum to one
+
+        # each shape is N x M
+        tx = (x - xa) / wa
+        print('gt tx.shape', tx.get_shape())
+        ty = (y - ya) / ha
+        tw = tf.log(w / wa)
+        th = tf.log(h / ha)
+
+        gt_params = tf.stack([tx, ty, tw, th], axis=2)
+        print('gt_params.shape', gt_params.get_shape())
+
+        offsets = tf.expand_dims(tf.reshape(offsets, [N, 4]), axis=1)
+        offsets = tf.tile(offsets, [1, M, 1])
+        print('offsets.shape', offsets.get_shape())
+
+        # TODO: replace l2 loss with huber loss (L1 smooth)
+        return tf.nn.l2_loss((offsets - gt_params) * mask)
 
     def _cross_border_filter(self, proposals, scores):
         return proposals, scores
