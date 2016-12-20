@@ -58,6 +58,8 @@ class RegionProposalNetwork(object):
         self.filters_num = 256
         self.ksize = [3, 3]
         self.H, self.W = H, W
+        # XXX: VGG architecture - conv5 layer has 4 maxpools, hence 16 = 2 ** 4
+        self.Hp, self.Wp = H // 16, W //16
         self.boxes = tf.Variable([
             (45, 90), (90, 45), (64, 64),
             (90, 180), (180, 90), (128, 128),
@@ -82,7 +84,6 @@ class RegionProposalNetwork(object):
             self.neg_scores * tf.log(self.neg_scores) +
             (1 - self.neg_scores) * tf.log(1 - self.neg_scores)
         ) / self.batch_size
-        # TODO: implement
         box_reg_loss = self._box_params_loss(
             self.gt,
             tf.reshape(self.anchor_centers, [-1, 4]),
@@ -96,7 +97,7 @@ class RegionProposalNetwork(object):
     def _build(self):
         self._create_conv6()
 
-        _, Hp, Wp, _ = self.layers['conv6_1'].get_shape().as_list()
+        Hp, Wp = self.Hp, self.Wp
         self._generate_anchor_centers(self.H, self.W, Hp, Wp)
 
         self.offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4])
@@ -186,6 +187,7 @@ class RegionProposalNetwork(object):
 
         # shape is Hp*Wp*k x 4
         proposals = tf.stack([x, y, w, h], axis=3)
+        # XXX: replace explicit shape with `-1`
         proposals = tf.reshape(proposals, [Hp * Wp * self.k, 4])
         return proposals
 
