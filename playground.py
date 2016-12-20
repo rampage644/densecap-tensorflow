@@ -243,8 +243,58 @@ with tf.Session() as sess:
 result[0][0]
 
 #%%
+import json
+bbox_filepath = 'output.json'
+image_filepath = '1.jpg'
+
+with open(bbox_filepath) as ifile:
+    data = json.load(ifile)
+image = scipy.misc.imread(image_filepath, mode='RGB')
+gt = np.array([[r['x'], r['y'], r['width'], r['height']] for r in data])
+
+
 importlib.reload(model)
 
+
 tf.reset_default_graph()
-vgg16 = model.VGG16(224, 224)
-rpn = model.RegionProposalNetwork(vgg16.layers['conv5_3'], 224, 224)
+
+H, W, _ = image.shape
+
+
+inputs = tf.placeholder(tf.float32, shape=[1, None, None, 3])
+H_input = tf.placeholder(tf.int32)
+W_input = tf.placeholder(tf.int32)
+
+vgg16 = model.VGG16(inputs)
+rpn = model.RegionProposalNetwork(vgg16.layers['conv5_3'], H_input, W_input)
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+
+    loss = sess.run(rpn.loss, {
+        vgg16.input: [image],
+        rpn.H: H,
+        rpn.W: W,
+        rpn.gt: gt[:64]
+    })
+
+
+#%%
+sh, sw = 16, 16
+H_input = tf.placeholder(tf.int32)
+W_input = tf.placeholder(tf.int32)
+H, W = tf.cast(H_input, tf.float32), tf.cast(W_input, tf.float32)
+
+# TODO: probably replace `numpy` ops with tf ones
+grid = tf.stack(tf.meshgrid(
+        tf.linspace(-0.5, H - 0.5, sh + 1),
+        tf.linspace(-0.5, W - 0.5, sw + 1)), axis=2)
+
+
+with tf.Session() as sess:
+    # TODO: continue! check if grid is creatable with that code!
+    # make H and W tf constants!
+    res = sess.run(grid, {
+        H_input: 224,
+        W_input: 224
+    })
