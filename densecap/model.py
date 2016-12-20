@@ -33,7 +33,7 @@ class VGG16(object):
         (4096),
         (1000)
     ]
-
+    # TODO: insert into pipeline: preprocess image
     mean_pixel = [103.939, 116.779, 123.68]
 
     def __init__(self, height, width):
@@ -116,7 +116,7 @@ class RegionProposalNetwork(object):
         # TODO: implement cross-boundary filetering
         proposals, scores = self._cross_border_filter(proposals, scores)
 
-        # XXX: consider specifying input size.
+        # XXX: consider not specifying input size.
         self.gt = tf.placeholder(tf.float32, [self.batch_size // 4, 4])  # M ground truth boxes
         pos_batch, neg_batch = self._generate_batches(proposals, self.gt, scores)
 
@@ -170,7 +170,6 @@ class RegionProposalNetwork(object):
         B = self.batch_size // 2
         # pad positive samples with negative if there are not enough
         # TODO: shuffle? random sampling?
-        print(positive_boxes.get_shape(), negative_boxes.get_shape())
         postitve_boxes = tf.slice(tf.concat(0, [positive_boxes, negative_boxes]), [0, 0], [B, -1])
         postitve_scores = tf.slice(tf.concat(0, [positive_scores, negative_scores]), [0, 0], [B, -1])
 
@@ -185,6 +184,7 @@ class RegionProposalNetwork(object):
 
     def _generate_proposals(self, offsets, Hp, Wp):
         # XXX: consider using tf.split instead
+        # XXX: check height and width indices
         # each shape is Hp x Wp x k
         tx = offsets[:, :, :, 0]  # tx
         ty = offsets[:, :, :, 1]  # ty
@@ -192,6 +192,7 @@ class RegionProposalNetwork(object):
         tw = offsets[:, :, :, 3]  # tw
 
         # XXX: consider using tf.split instead
+        # XXX: check height and width indices
         # each shape is Hp x Wp x k
         xa = self.anchor_centers[:, :, :, 0]
         ya = self.anchor_centers[:, :, :, 1]
