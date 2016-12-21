@@ -115,23 +115,7 @@ class RegionProposalNetwork(object):
         self.neg_boxes, self.neg_scores = neg_batch
 
     def _generate_batches(self, proposals, gt, scores):
-        N = self.Hp * self.Wp * self.k
-        M, d = gt.get_shape().as_list()
-
-        orig_proposals = proposals
-        proposals = tf.expand_dims(proposals, axis=1)
-        proposals = tf.tile(proposals, [1, M, 1])
-
-        gt = tf.expand_dims(gt, axis=0)
-        gt = tf.tile(gt, [N, 1, 1])
-
-        proposals = tf.reshape(proposals, (N*M, d), name='3')
-        gt = tf.reshape(gt, (N*M, d), name='4')
-
-        # shape is N*M x 1
-        # TODO: speed up (!)
-        iou_metric = tf.map_fn(iou, tf.stack([proposals, gt], axis=1))
-        iou_metric = tf.reshape(iou_metric, [N, M], name='5')
+        iou_metric = self._iou(gt, proposals)
 
         # now let's get rid of non-positive and non-negative samples
         # here we take either iou value if it greater than threshold
@@ -148,8 +132,8 @@ class RegionProposalNetwork(object):
         neg_mask = tf.less(iou_metric, 0.3)
         negative_mask = tf.reduce_all(neg_mask, axis=1)
 
-        positive_boxes = tf.boolean_mask(orig_proposals, positive_mask)
-        negative_boxes = tf.boolean_mask(orig_proposals, negative_mask)
+        positive_boxes = tf.boolean_mask(proposals, positive_mask)
+        negative_boxes = tf.boolean_mask(proposals, negative_mask)
 
         positive_scores = tf.boolean_mask(scores, positive_mask)
         negative_scores = tf.boolean_mask(scores, negative_mask)
@@ -177,6 +161,31 @@ class RegionProposalNetwork(object):
             (positive_boxes, positive_scores),
             (negative_boxes, negative_scores)
         )
+
+    def _iou(self, gt, proposals):
+        N = self.Hp * self.Wp * self.k
+        M, d = gt.get_shape().as_list()
+
+        proposals = tf.expand_dims(proposals, axis=1)
+        proposals = tf.tile(proposals, [1, M, 1])
+
+        gt = tf.expand_dims(gt, axis=0)
+        gt = tf.tile(gt, [N, 1, 1])
+
+        x11, y11, w1, h1 = tf.unstack(proposals, axis=2)
+        x12, y12 = x11 + w1, y11 + h1
+        x21, y21, w2, h2 = tf.unstack(gt, axis=2)
+        x22, y22 = x21 + w2, y21 + h2
+
+        intersection = (
+            tf.maximum(0.0, tf.minimum(x12, x22) - tf.maximum(x11, x21)) *
+            tf.maximum(0.0, tf.minimum(y12, y22) - tf.maximum(y11, y21))
+        )
+
+        iou_metric = intersection / (
+            w1 * h1 + w2 * h2 - intersection
+        )
+        return iou_metric
 
 
     def _generate_proposals(self, offsets, Hp, Wp):
