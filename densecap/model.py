@@ -80,7 +80,8 @@ class RegionProposalNetwork(object):
 
     def _create_loss(self):
         scores = tf.concat(0, [self.pos_scores, self.neg_scores])
-        score_loss = - tf.reduce_sum(
+        # XXX: check log-loss correctness (is minus required)
+        score_loss = tf.reduce_sum(
             scores * tf.log(scores) + (1 - scores) * tf.log(1 - scores)
         )
 
