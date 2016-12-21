@@ -4,6 +4,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import datetime
 import os
 import json
 
@@ -52,27 +53,52 @@ def main(_):
     vgg16 = model.VGG16(image_input)
     rpn = model.RegionProposalNetwork(vgg16.layers['conv5_3'])
 
+    current_run_log_dir = os.path.join(
+        FLAGS.log_dir,
+        datetime.datetime.now().isoformat()
+    )
+    writer = tf.train.SummaryWriter(current_run_log_dir, graph=tf.get_default_graph())
+    saver = tf.train.Saver()
+    saved_model = tf.train.latest_checkpoint(FLAGS.ckpt_dir)
+
+    if not os.path.exists(FLAGS.ckpt_dir):
+        os.makedirs(FLAGS.ckpt_dir)
+
+
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
+
+        if saved_model:
+            saver.restore(sess, saved_model)
+        else:
+            print('Prevous model not found, starting from scratch.')
 
         for epoch in range(FLAGS.epoch):
             for image, gt_boxes in train_data(FLAGS.region_desc, FLAGS.limit):
                 height, width, _ = image.shape
 
-                loss, step, _ = sess.run(
-                    [rpn.loss, rpn.global_step, rpn.train_op], {
+                merged = tf.summary.merge_all()
+                loss, step, summary, _ = sess.run(
+                    [rpn.loss, rpn.global_step, merged, rpn.train_op], {
                         vgg16.input: [image],
                         rpn.H: height,
                         rpn.W: width,
                         rpn.gt: gt_boxes,
                         rpn.gt_box_count: len(gt_boxes)
                 })
+                writer.add_summary(summary, global_step=step)
 
                 if not step % FLAGS.log_every:
                     print('\rEpoch {:<3} step {:<6} loss: {:<5.2f}'\
                         .format(epoch+1, step, loss), end='')
+                if not step % FLAGS.save_every:
+                    saver.save(
+                        sess,
+                        os.path.join(FLAGS.ckpt_dir, 'densecap'),
+                        global_step=rpn.global_step)
         print()
 
+    writer.close()
 
 
 if __name__ == '__main__':

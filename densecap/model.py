@@ -93,6 +93,10 @@ class RegionProposalNetwork(object):
         )
         self.loss = tf.add(score_loss, tf.mul(self.l1_coef, box_reg_loss, name='box_loss_lambda'), name='total_loss')
 
+        tf.summary.scalar('score_loss', score_loss)
+        tf.summary.scalar('box_regression_loss', box_reg_loss)
+        tf.summary.scalar('loss', self.loss)
+
     def _create_train(self):
         optimizer = tf.train.AdamOptimizer(self.learning_rate)
         self.train_op = optimizer.minimize(self.loss, global_step=self.global_step)
