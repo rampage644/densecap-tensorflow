@@ -59,15 +59,19 @@ def main(_):
             for image, gt_boxes in train_data(FLAGS.region_desc, FLAGS.limit):
                 height, width, _ = image.shape
 
-                loss, _ = sess.run(
-                    [rpn.loss, rpn.train_op], {
+                loss, step, _ = sess.run(
+                    [rpn.loss, rpn.global_step, rpn.train_op], {
                         vgg16.input: [image],
                         rpn.H: height,
                         rpn.W: width,
                         rpn.gt: gt_boxes,
                         rpn.gt_box_count: len(gt_boxes)
                 })
-                print(loss)
+
+                if not step % FLAGS.log_every:
+                    print('\rEpoch {:<3} step {:<6} loss: {:<5.2f}'\
+                        .format(epoch+1, step, loss), end='')
+        print()
 
 
 
