@@ -271,13 +271,14 @@ rpn = model.RegionProposalNetwork(vgg16.layers['conv5_3'], H_input, W_input)
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
 
-    loss = sess.run(rpn.loss, {
-        vgg16.input: [image],
-        rpn.H: H,
-        rpn.W: W,
-        rpn.gt: gt[:64]
-    })
-
+    loss, _ = sess.run(
+        [rpn.loss, rpn.train_op], {
+            vgg16.input: [image],
+            rpn.H: H,
+            rpn.W: W,
+            rpn.gt: gt[:64]
+        }
+    )
 
 #%%
 sh, sw = 16, 16
@@ -298,3 +299,64 @@ with tf.Session() as sess:
         H_input: 224,
         W_input: 224
     })
+
+
+#%%
+# Going to check the speed of map_fn ops and try to improve things
+
+N = 20000
+M, d = 200, 4
+gt = tf.random_uniform([M, d])
+proposals = tf.random_uniform([N, d])
+
+def run(proposals, gt, device='/cpu:0'):
+
+    with tf.device(device):
+        proposals = tf.expand_dims(proposals, axis=1)
+        proposals = tf.tile(proposals, [1, M, 1])
+
+        gt = tf.expand_dims(gt, axis=0)
+        gt = tf.tile(gt, [N, 1, 1])
+
+        proposals = tf.reshape(proposals, (N*M, d))
+        gt = tf.reshape(gt, (N*M, d))
+
+        # shape is N*M x 1
+        iou_metric = tf.map_fn(model.iou, tf.stack([proposals, gt], axis=1))
+        iou_metric = tf.reshape(iou_metric, [N, M])
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        sess.run(iou_metric)
+
+# result is 2min48s
+%timeit -n 1 -r 1 run(proposals, gt)
+
+def run2(proposals, gt, device):
+    with tf.device(device):
+        proposals = tf.expand_dims(proposals, axis=1)
+        proposals = tf.tile(proposals, [1, M, 1])
+
+        gt = tf.expand_dims(gt, axis=0)
+        gt = tf.tile(gt, [N, 1, 1])
+
+        x11, y11, w1, h1 = tf.unstack(proposals, axis=2)
+        x12, y12 = x11 + w1, y11 + h1
+        x21, y21, w2, h2 = tf.unstack(gt, axis=2)
+        x22, y22 = x21 + w2, y21 + h2
+
+        intersection = (
+            tf.maximum(0.0, tf.minimum(x12, x22) - tf.maximum(x11, x21)) *
+            tf.maximum(0.0, tf.minimum(y12, y22) - tf.maximum(y11, y21))
+        )
+
+        iou_metric = intersection / (
+            w1 * h1 + w2 * h2 - intersection
+        )
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        sess.run(iou_metric)
+
+# result is 427ms!
+%timeit run2(proposals, gt, '/cpu:0')
