@@ -43,6 +43,7 @@ class VGG16(object):
                     value,
                     filters,
                     [3, 3],
+                    trainable=False,
                     scope=name
                 )
                 self.layers[name] = value
@@ -82,7 +83,7 @@ class RegionProposalNetwork(object):
     def _create_loss(self):
         scores = tf.concat(0, [self.pos_scores, self.neg_scores])
         # XXX: check log-loss correctness (is minus required)
-        score_loss = tf.reduce_sum(
+        score_loss = -tf.reduce_sum(
             scores * tf.log(scores) + (1 - scores) * tf.log(1 - scores)
         )
 
@@ -290,14 +291,11 @@ class RegionProposalNetwork(object):
     def _generate_anchor_centers(self, H, W, Hp, Wp):
         # those are strides in terms of original image
         # i.e. what x and y base image strides corresponds to 1,1 conv layer stride
-        # XXX: check for Hp Wp everywhere!!
-        sh, sw = 16, 16
         H, W = tf.cast(H, tf.float32), tf.cast(W, tf.float32)
 
-        # TODO: probably replace `numpy` ops with tf ones
         grid = tf.stack(tf.meshgrid(
-                tf.linspace(-0.5, H - 0.5, Wp),
-                tf.linspace(-0.5, W - 0.5, Hp)), axis=2)
+            tf.linspace(-0.5, H - 0.5, Wp),
+            tf.linspace(-0.5, W - 0.5, Hp)), axis=2)
 
         # convert boxes from K x 2 to 1 x 1 x K x 2
         boxes = tf.expand_dims(tf.expand_dims(self.boxes, 0), 0)

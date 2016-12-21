@@ -45,6 +45,14 @@ def train_data(filename, limit):
         yield (image, gt_boxes)
 
 
+def load_vgg16_weights(sess):
+    with np.load('data/vgg16_weights.npz') as ifile:
+        for v in tf.global_variables():
+            name = v.name.replace('weights', 'W').replace('biases', 'b').replace('/', '_')[:-2]
+            if name in ifile:
+                sess.run(tf.assign(v, ifile[name]))
+
+
 def main(_):
     '''entry point'''
 
@@ -66,18 +74,18 @@ def main(_):
 
 
     with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-
         if saved_model:
             saver.restore(sess, saved_model)
         else:
             print('Prevous model not found, starting from scratch.')
+            sess.run(tf.global_variables_initializer())
+            load_vgg16_weights(sess)
 
         for epoch in range(FLAGS.epoch):
             for image, gt_boxes in train_data(FLAGS.region_desc, FLAGS.limit):
                 height, width, _ = image.shape
-
                 merged = tf.summary.merge_all()
+
                 loss, step, summary, _ = sess.run(
                     [rpn.loss, rpn.global_step, merged, rpn.train_op], {
                         vgg16.input: [image],
@@ -86,11 +94,13 @@ def main(_):
                         rpn.gt: gt_boxes,
                         rpn.gt_box_count: len(gt_boxes)
                 })
+
                 writer.add_summary(summary, global_step=step)
 
                 if not step % FLAGS.log_every:
-                    print('\rEpoch {:<3} step {:<6} loss: {:<5.2f}'\
+                    print('\rEpoch {:<2} step {:<6} loss: {:<8.2f}'\
                         .format(epoch+1, step, loss), end='')
+
                 if not step % FLAGS.save_every:
                     saver.save(
                         sess,
