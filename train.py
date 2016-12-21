@@ -48,12 +48,9 @@ def main(_):
     '''entry point'''
 
     image_input = tf.placeholder(tf.float32, shape=[1, None, None, 3])
-    height_input = tf.placeholder(tf.int32)
-    width_input = tf.placeholder(tf.int32)
 
     vgg16 = model.VGG16(image_input)
-    rpn = model.RegionProposalNetwork(
-        vgg16.layers['conv5_3'], height_input, width_input)
+    rpn = model.RegionProposalNetwork(vgg16.layers['conv5_3'])
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
@@ -67,7 +64,8 @@ def main(_):
                         vgg16.input: [image],
                         rpn.H: height,
                         rpn.W: width,
-                        rpn.gt: gt_boxes[:64]
+                        rpn.gt: gt_boxes,
+                        rpn.gt_box_count: len(gt_boxes)
                 })
                 print(loss)
 

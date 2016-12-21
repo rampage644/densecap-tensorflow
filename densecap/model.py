@@ -52,14 +52,15 @@ class VGG16(object):
 
 class RegionProposalNetwork(object):
     # TODO: make H and W dynamic
-    def __init__(self, conv_layer, H, W):
+    def __init__(self, conv_layer):
         # conv_layer should be (N, H', W', C) tensor
         self.input = conv_layer
         self.filters_num = 256
         self.ksize = [3, 3]
-        self.H, self.W = H, W
-        # XXX: VGG architecture - conv5 layer has 4 maxpools, hence 16 = 2 ** 4
-        self.Hp, self.Wp = H // 16, W //16
+        self.H, self.W = tf.placeholder(tf.int32), tf.placeholder(tf.int32)
+        # VGG architecture - conv5 layer has 4 maxpools, hence 16 = 2 ** 4
+        self.Hp, self.Wp = self.H // 16, self.W // 16
+        self.gt_box_count = tf.placeholder(tf.int32)
         self.boxes = tf.Variable([
             (45, 90), (90, 45), (64, 64),
             (90, 180), (180, 90), (128, 128),
@@ -79,7 +80,7 @@ class RegionProposalNetwork(object):
 
     def _create_loss(self):
         scores = tf.concat(0, [self.pos_scores, self.neg_scores])
-        score_loss = tf.reduce_sum(
+        score_loss = - tf.reduce_sum(
             scores * tf.log(scores) + (1 - scores) * tf.log(1 - scores)
         )
 
@@ -108,7 +109,7 @@ class RegionProposalNetwork(object):
         proposals, scores = self._cross_border_filter(proposals, scores)
 
         # XXX: consider not specifying input size.
-        self.gt = tf.placeholder(tf.float32, [self.batch_size // 4, 4])  # M ground truth boxes
+        self.gt = tf.placeholder(tf.float32, [None, 4])  # M ground truth boxes
         pos_batch, neg_batch = self._generate_batches(proposals, self.gt, scores)
 
         self.pos_boxes, self.pos_scores = pos_batch
@@ -164,7 +165,7 @@ class RegionProposalNetwork(object):
 
     def _iou(self, gt, proposals):
         N = self.Hp * self.Wp * self.k
-        M, d = gt.get_shape().as_list()
+        M = self.gt_box_count
 
         proposals = tf.expand_dims(proposals, axis=1)
         proposals = tf.tile(proposals, [1, M, 1])
@@ -207,7 +208,7 @@ class RegionProposalNetwork(object):
 
     def _box_params_loss(self, ground_truth, anchor_centers, pos_sample_mask, offsets):
         N = self.Wp * self.Hp * self.k
-        M, _ = ground_truth.get_shape().as_list()
+        M = self.gt_box_count
         print('M = ', M, 'N = ', N)
         # ground_truth shape is M x 4, where M is count and 4 are x,y,w,h
         gt = tf.expand_dims(ground_truth, axis=0)
