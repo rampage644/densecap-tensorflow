@@ -217,23 +217,17 @@ class RegionProposalNetwork(object):
     def _box_params_loss(self, ground_truth, anchor_centers, pos_sample_mask, offsets):
         N = self.Wp * self.Hp * self.k
         M = self.gt_box_count
-        print('M = ', M, 'N = ', N)
         # ground_truth shape is M x 4, where M is count and 4 are x,y,w,h
         gt = tf.expand_dims(ground_truth, axis=0)
         gt = tf.tile(gt, [N, 1, 1])
-        print('gt.shape', gt.get_shape())
         # anchor_centers shape is N x 4 where N is count and 4 are xa,ya,wa,ha
         anchor_centers = tf.expand_dims(anchor_centers, axis=1)
         anchor_centers = tf.tile(anchor_centers, [1, M, 1])
-        print('anchor_centers.shape', anchor_centers.get_shape())
         # pos_sample_mask shape is N x M, True are for positive proposals
         mask = tf.expand_dims(tf.cast(pos_sample_mask, tf.float32), axis=2)
-        print('mask.shape', mask.get_shape())
 
         xa, ya, wa, ha = tf.unstack(anchor_centers, axis=2)
-        print('anchor_centers xa.shape', xa.get_shape())
         x, y, w, h = tf.unstack(gt, axis=2)
-        print('gt x.shape', x.get_shape())
 
         # idea is to calculate N x M tx, ty, tw, th for ground truth boxes
         # for every proposal. Then we caclulate loss, multiply it with mask
@@ -246,11 +240,9 @@ class RegionProposalNetwork(object):
         th = tf.log(tf.div(h, ha, name='h_div_ha'))
 
         gt_params = tf.stack([tx, ty, tw, th], axis=2)
-        print('gt_params.shape', gt_params.get_shape())
 
         offsets = tf.expand_dims(tf.reshape(offsets, [N, 4], name='7'), axis=1)
         offsets = tf.tile(offsets, [1, M, 1])
-        print('offsets.shape', offsets.get_shape())
 
         # TODO: replace l2 loss with huber loss (L1 smooth)
         return tf.nn.l2_loss((offsets - gt_params) * mask)
