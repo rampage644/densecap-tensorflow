@@ -7,6 +7,7 @@ import densecap.model
 import importlib
 import scipy.misc
 import collections
+import json
 
 
 import imagenet_classes
@@ -360,3 +361,42 @@ def run2(proposals, gt, device):
 
 # result is 427ms!
 %timeit run2(proposals, gt, '/cpu:0')
+
+
+#%%
+importlib.reload(model)
+tf.reset_default_graph()
+
+image_input = tf.placeholder(tf.float32, shape=[1, None, None, 3])
+vgg16 = model.VGG16(image_input)
+rpn = model.RegionProposalNetwork(vgg16.layers['conv5_3'])
+# saver = tf.train.Saver()
+# saved_model = tf.train.latest_checkpoint()
+
+k = 50
+image = scipy.misc.imread('1.jpg', mode='RGB')
+data = json.load(open('output.json'))
+gt_boxes = np.array([[r['x'], r['y'], r['width'], r['height']]
+                             for r in data]).astype(np.float32)
+height, width, _ = image.shape
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+
+    proposals = tf.reshape(rpn.offsets, [-1, 4])
+    boxes, scores = sess.run(
+        [proposals, rpn.scores], {
+            rpn.H: height,
+            rpn.W: width,
+            vgg16.input: [image]
+        })
+    proposals = np.squeeze(boxes[np.argsort(scores)][-k:])
+
+
+    gt = tf.placeholder(tf.float32, [len(gt_boxes), 4])
+    iou = sess.run(rpn._iou(gt, len(gt_boxes), proposals, len(proposals)), {
+        gt: gt_boxes
+    })
+
+    recall = np.any(iou > 0.7, axis=0).astype(np.float32).sum() / len(gt_boxes)
+

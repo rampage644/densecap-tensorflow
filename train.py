@@ -26,6 +26,7 @@ tf.app.flags.DEFINE_integer('limit', 0, 'Limit training process to first `limit`
 tf.app.flags.DEFINE_integer('epoch', 10, 'Epoch count')
 tf.app.flags.DEFINE_integer('log_every', 100, 'Print log messages every `log_every` steps')
 tf.app.flags.DEFINE_integer('save_every', 100, 'Save model checkpoint every `save_every` steps')
+tf.app.flags.DEFINE_integer('eval_every', 100, 'Eval model every `eval_every` steps')
 tf.app.flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate')
 
 
@@ -93,7 +94,7 @@ def main(_):
                         rpn.W: width,
                         rpn.gt: gt_boxes,
                         rpn.gt_box_count: len(gt_boxes)
-                })
+                    })
 
                 writer.add_summary(summary, global_step=step)
 
@@ -106,6 +107,31 @@ def main(_):
                         sess,
                         os.path.join(FLAGS.ckpt_dir, 'densecap'),
                         global_step=rpn.global_step)
+
+                if not step % FLAGS.eval_every:
+                    k = 50
+                    proposals = tf.reshape(rpn.offsets, [-1, 4])
+                    boxes, scores = sess.run(
+                        [proposals, rpn.scores], {
+                            rpn.H: height,
+                            rpn.W: width,
+                            vgg16.input: [image]
+                        })
+                    proposals = np.squeeze(boxes[np.argsort(scores)][-k:])
+
+                    gt = tf.placeholder(tf.float32, [len(gt_boxes), 4])
+                    iou = sess.run(rpn._iou(gt, len(gt_boxes), proposals, k), {
+                        gt: gt_boxes
+                    })
+
+                    recall = np.any(iou > 0.7, axis=0).astype(np.float32).sum() / len(gt_boxes)
+
+                    summary = tf.Summary(value=[
+                        tf.Summary.Value(tag='recall', simple_value=recall),
+                    ])
+                    writer.add_summary(summary, global_step=step)
+
+
         print()
 
     writer.close()

@@ -111,10 +111,10 @@ class RegionProposalNetwork(object):
         self.offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4], name='1')
         proposals = self._generate_proposals(self.offsets, Hp, Wp)
         # XXX: replace sigmoid with logits once scores are 2 numbers instead of 1
-        scores = tf.reshape(tf.sigmoid(self.layers['scores']), [Hp * Wp * self.k, 1], name='2')
+        self.scores = tf.reshape(tf.sigmoid(self.layers['scores']), [Hp * Wp * self.k, 1], name='2')
 
         # TODO: implement cross-boundary filetering
-        proposals, scores = self._cross_border_filter(proposals, scores)
+        proposals, scores = self._cross_border_filter(proposals, self.scores)
 
         # XXX: consider not specifying input size.
         self.gt = tf.placeholder(tf.float32, [None, 4])  # M ground truth boxes
@@ -124,7 +124,8 @@ class RegionProposalNetwork(object):
         self.neg_boxes, self.neg_scores = neg_batch
 
     def _generate_batches(self, proposals, gt, scores):
-        iou_metric = self._iou(gt, proposals)
+        iou_metric = self._iou(gt, self.gt_box_count,
+                               proposals, self.Hp * self.Wp * self.k)
 
         # now let's get rid of non-positive and non-negative samples
         # here we take either iou value if it greater than threshold
@@ -171,9 +172,9 @@ class RegionProposalNetwork(object):
             (negative_boxes, negative_scores)
         )
 
-    def _iou(self, gt, proposals):
-        N = self.Hp * self.Wp * self.k
-        M = self.gt_box_count
+    def _iou(self, gt, gt_count, proposals, proposals_count):
+        N = proposals_count
+        M = gt_count
 
         proposals = tf.expand_dims(proposals, axis=1)
         proposals = tf.tile(proposals, [1, M, 1])
