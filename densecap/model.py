@@ -81,11 +81,12 @@ class RegionProposalNetwork(object):
         self._create_train()
 
     def _create_loss(self):
-        scores = tf.concat(0, [self.pos_scores, self.neg_scores])
-        # XXX: check log-loss correctness (is minus required)
-        score_loss = -tf.reduce_sum(
-            scores * tf.log(scores) + (1 - scores) * tf.log(1 - scores)
-        )
+        predicted_scores = tf.concat(0, [self.pos_scores, self.neg_scores])
+        true_labels = tf.to_int32(tf.concat(0, [self.true_pos_scores, self.true_neg_scores]))
+
+        score_loss = tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(
+            predicted_scores, true_labels
+        ))
 
         box_reg_loss = self._box_params_loss(
             self.gt,
@@ -110,18 +111,17 @@ class RegionProposalNetwork(object):
 
         self.offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4], name='1')
         proposals = self._generate_proposals(self.offsets, Hp, Wp)
-        # XXX: replace sigmoid with logits once scores are 2 numbers instead of 1
-        self.scores = tf.reshape(tf.sigmoid(self.layers['scores']), [Hp * Wp * self.k, 1], name='2')
+        self.scores = tf.reshape(self.layers['scores'], [Hp * Wp * self.k, 2], name='2')
 
         # TODO: implement cross-boundary filetering
         proposals, scores = self._cross_border_filter(proposals, self.scores)
+        self.proposals = proposals
 
-        # XXX: consider not specifying input size.
         self.gt = tf.placeholder(tf.float32, [None, 4])  # M ground truth boxes
         pos_batch, neg_batch = self._generate_batches(proposals, self.gt, scores)
 
-        self.pos_boxes, self.pos_scores = pos_batch
-        self.neg_boxes, self.neg_scores = neg_batch
+        self.pos_boxes, self.pos_scores, self.true_pos_scores = pos_batch
+        self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
 
     def _generate_batches(self, proposals, gt, scores):
         iou_metric = self._iou(gt, self.gt_box_count,
@@ -146,18 +146,24 @@ class RegionProposalNetwork(object):
         negative_boxes = tf.boolean_mask(proposals, negative_mask)
 
         positive_scores = tf.boolean_mask(scores, positive_mask)
+        true_positive_scores = tf.reduce_mean(tf.ones_like(positive_scores), axis=1)
         negative_scores = tf.boolean_mask(scores, negative_mask)
+        true_negative_scores = tf.reduce_mean(tf.zeros_like(negative_scores), axis=1)
 
         B = self.batch_size // 2
         # pad positive samples with negative if there are not enough
         # TODO: shuffle? random sampling?
-        postitve_boxes = tf.slice(
+        positive_boxes = tf.slice(
             tf.concat(0, [positive_boxes, negative_boxes]), [0, 0], [B, -1],
             name='pos_box_slice'
         )
-        postitve_scores = tf.slice(
+        positive_scores = tf.slice(
             tf.concat(0, [positive_scores, negative_scores]), [0, 0], [B, -1],
             name='pos_score_slice'
+        )
+        true_scores = tf.slice(
+            tf.concat(0, [true_positive_scores, true_negative_scores]), [0], [B],
+            name='true_score_slice'
         )
 
         negative_boxes = tf.slice(
@@ -168,9 +174,18 @@ class RegionProposalNetwork(object):
         )
 
         return (
-            (positive_boxes, positive_scores),
-            (negative_boxes, negative_scores)
+            (positive_boxes, positive_scores, true_scores),
+            (negative_boxes, negative_scores, tf.reduce_sum(tf.zeros_like(negative_scores), axis=1))
         )
+
+    def _huber_loss(self, x, coef=0.5):
+        l2_mask = tf.less(tf.abs(x), 1)
+        l1_mask = tf.greater_equal(tf.abs(x), 1)
+
+        term_1 = tf.reduce_sum(coef * tf.square(tf.boolean_mask(x, l2_mask)))
+        term_2 = tf.reduce_sum((tf.abs(tf.boolean_mask(x, l1_mask)) - coef))
+
+        return term_1 + term_2
 
     def _iou(self, gt, gt_count, proposals, proposals_count):
         N = proposals_count
@@ -196,7 +211,6 @@ class RegionProposalNetwork(object):
             w1 * h1 + w2 * h2 - intersection
         )
         return iou_metric
-
 
     def _generate_proposals(self, offsets, Hp, Wp):
         # each shape is Hp x Wp x k
@@ -245,8 +259,7 @@ class RegionProposalNetwork(object):
         offsets = tf.expand_dims(tf.reshape(offsets, [N, 4], name='7'), axis=1)
         offsets = tf.tile(offsets, [1, M, 1])
 
-        # TODO: replace l2 loss with huber loss (L1 smooth)
-        return tf.nn.l2_loss((offsets - gt_params) * mask)
+        return self._huber_loss((offsets - gt_params) * mask)
 
     def _cross_border_filter(self, proposals, scores):
         return proposals, scores
@@ -274,10 +287,10 @@ class RegionProposalNetwork(object):
 
         scores = tf.contrib.layers.conv2d(
             conv,
-            1 * self.k,  # XXX: check if 1 is enough (switch to 2?)
+            2 * self.k,
             [1] * 2,
             scope='scores'
-        )  # H' x W' x k
+        )  # H' x W' x 2k
         self.layers['scores'] = scores[0]
 
 

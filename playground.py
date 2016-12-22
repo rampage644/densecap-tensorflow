@@ -370,8 +370,8 @@ tf.reset_default_graph()
 image_input = tf.placeholder(tf.float32, shape=[1, None, None, 3])
 vgg16 = model.VGG16(image_input)
 rpn = model.RegionProposalNetwork(vgg16.layers['conv5_3'])
-# saver = tf.train.Saver()
-# saved_model = tf.train.latest_checkpoint()
+saver = tf.train.Saver()
+saved_model = tf.train.latest_checkpoint('ckpt/')
 
 k = 50
 image = scipy.misc.imread('1.jpg', mode='RGB')
@@ -381,22 +381,35 @@ gt_boxes = np.array([[r['x'], r['y'], r['width'], r['height']]
 height, width, _ = image.shape
 
 with tf.Session() as sess:
-    sess.run(tf.global_variables_initializer())
+    # sess.run(tf.global_variables_initializer())
+    saver.restore(sess, saved_model)
 
-    proposals = tf.reshape(rpn.offsets, [-1, 4])
     boxes, scores = sess.run(
-        [proposals, rpn.scores], {
+        [rpn.proposals, tf.nn.softmax(rpn.scores)], {
             rpn.H: height,
             rpn.W: width,
             vgg16.input: [image]
         })
-    proposals = np.squeeze(boxes[np.argsort(scores)][-k:])
+    proposals = np.squeeze(boxes[np.argsort(scores[:, 1])][-k:])
 
 
-    gt = tf.placeholder(tf.float32, [len(gt_boxes), 4])
-    iou = sess.run(rpn._iou(gt, len(gt_boxes), proposals, len(proposals)), {
-        gt: gt_boxes
+    xmin, ymin, w, h = np.split(proposals, 4, axis=1)
+
+    xmax, ymax = xmin + w, ymin + h
+    xmin, xmax, ymin, ymax = xmin / w, xmax / w, ymin / h, ymax / h
+
+    images = tf.placeholder(tf.float32, [1, height, width, 3])
+    boxes_p = tf.placeholder(tf.float32, [1, k, 4])
+    bbox_image = tf.image.draw_bounding_boxes(images, boxes_p)
+    output_images = sess.run(bbox_image, {
+        images: [image],
+        boxes_p: np.expand_dims(np.hstack([ymin, xmin, ymax, xmax]), axis=0)
     })
 
-    recall = np.any(iou > 0.7, axis=0).astype(np.float32).sum() / len(gt_boxes)
+    scipy.misc.imsave('output.png', output_images[0])
 
+#%%
+boxes.shape
+scores.shape
+np.argsort(scores[:, 1])
+proposals

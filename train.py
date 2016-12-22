@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 import datetime
 import os
 import json
+import gc
 
 import tensorflow as tf
 import numpy as np
@@ -98,6 +99,8 @@ def main(_):
 
                 writer.add_summary(summary, global_step=step)
 
+                gc.collect()
+
                 if not step % FLAGS.log_every:
                     print('\rEpoch {:<2} step {:<6} loss: {:<8.2f}'\
                         .format(epoch+1, step, loss), end='')
@@ -112,12 +115,12 @@ def main(_):
                     k = 50
                     proposals = tf.reshape(rpn.offsets, [-1, 4])
                     boxes, scores = sess.run(
-                        [proposals, rpn.scores], {
+                        [proposals, tf.nn.softmax(rpn.scores)], {
                             rpn.H: height,
                             rpn.W: width,
                             vgg16.input: [image]
                         })
-                    proposals = np.squeeze(boxes[np.argsort(scores)][-k:])
+                    proposals = np.squeeze(boxes[np.argsort(scores[:, 1])][-k:])
 
                     gt = tf.placeholder(tf.float32, [len(gt_boxes), 4])
                     iou = sess.run(rpn._iou(gt, len(gt_boxes), proposals, k), {
