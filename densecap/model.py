@@ -55,32 +55,34 @@ class VGG16(object):
 
 
 class RegionProposalNetwork(object):
-    def __init__(self, conv_layer):
-        # conv_layer should be (N, H', W', C) tensor
-        self.input = conv_layer
+    def __init__(self, vgg_conv_layer):
+        self._create_variables()
+
+        self.input = vgg_conv_layer
         self.filters_num = 256
         self.ksize = [3, 3]
+        self.learning_rate = 0.001
+        self.batch_size = 256
+        self.l1_coef = 10.0
+        self.k, _ = self.boxes.get_shape().as_list()
+
+        self.layers = {}
+        self._build()
+        self._create_loss()
+        self._create_train()
+
+    def _create_variables(self):
         self.H, self.W = tf.placeholder(tf.int32), tf.placeholder(tf.int32)
+        self.gt_box_count = tf.placeholder(tf.int32)
         # VGG architecture - conv5 layer has 4 maxpools, hence 16 = 2 ** 4
         self.Hp, self.Wp = self.H // 16, self.W // 16
-        self.gt_box_count = tf.placeholder(tf.int32)
         self.boxes = tf.Variable([
             (45, 90), (90, 45), (64, 64),
             (90, 180), (180, 90), (128, 128),
             (181, 362), (362, 181), (256, 256),
             (362, 724), (724, 362), (512, 512),
         ], dtype=tf.float32)
-        self.k, _ = self.boxes.get_shape().as_list()
-        # TODO: parametrize
-        self.learning_rate = 0.001
-        self.batch_size = 256
-        self.l1_coef = 10.0
         self.global_step = tf.Variable(0, name='global_step')
-
-        self.layers = {}
-        self._build()
-        self._create_loss()
-        self._create_train()
 
     def _create_loss(self):
         predicted_scores = tf.concat(0, [self.pos_scores, self.neg_scores])
