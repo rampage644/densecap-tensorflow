@@ -11,12 +11,15 @@ import tensorflow as tf
 import densecap.util as util
 
 
-def iou(x):
-    '''Helper function to calculate IoU
+def huber_loss(x, delta=1):
+    coef = 0.5
+    l2_mask = tf.less_equal(tf.abs(x), delta)
+    l1_mask = tf.greater(tf.abs(x), delta)
 
-    x: 2 x 4 Tensor
-    '''
-    return util.tf_iou(x[0], x[1])
+    term_1 = tf.reduce_sum(coef * tf.square(tf.boolean_mask(x, l2_mask)))
+    term_2 = tf.reduce_sum(delta * (tf.abs(tf.boolean_mask(x, l1_mask)) - coef * delta))
+
+    return term_1 + term_2
 
 
 class VGG16(object):
@@ -52,7 +55,6 @@ class VGG16(object):
 
 
 class RegionProposalNetwork(object):
-    # TODO: make H and W dynamic
     def __init__(self, conv_layer):
         # conv_layer should be (N, H', W', C) tensor
         self.input = conv_layer
@@ -178,15 +180,6 @@ class RegionProposalNetwork(object):
             (negative_boxes, negative_scores, tf.reduce_sum(tf.zeros_like(negative_scores), axis=1))
         )
 
-    def _huber_loss(self, x, coef=0.5):
-        l2_mask = tf.less(tf.abs(x), 1)
-        l1_mask = tf.greater_equal(tf.abs(x), 1)
-
-        term_1 = tf.reduce_sum(coef * tf.square(tf.boolean_mask(x, l2_mask)))
-        term_2 = tf.reduce_sum((tf.abs(tf.boolean_mask(x, l1_mask)) - coef))
-
-        return term_1 + term_2
-
     def _iou(self, gt, gt_count, proposals, proposals_count):
         N = proposals_count
         M = gt_count
@@ -259,7 +252,7 @@ class RegionProposalNetwork(object):
         offsets = tf.expand_dims(tf.reshape(offsets, [N, 4], name='7'), axis=1)
         offsets = tf.tile(offsets, [1, M, 1])
 
-        return self._huber_loss((offsets - gt_params) * mask)
+        return huber_loss((offsets - gt_params) * mask)
 
     def _cross_border_filter(self, proposals, scores):
         return proposals, scores
