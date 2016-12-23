@@ -74,8 +74,6 @@ class RegionProposalNetwork(object):
     def _create_variables(self):
         self.image_height, self.image_width = tf.placeholder(tf.int32), tf.placeholder(tf.int32)
         self.gt_box_count = tf.placeholder(tf.int32)
-        # VGG architecture - conv5 layer has 4 maxpools, hence 16 = 2 ** 4
-        self.Hp, self.Wp = self.image_height // 16, self.image_width // 16
         self.boxes = tf.Variable([
             (45, 90), (90, 45), (64, 64),
             (90, 180), (180, 90), (128, 128),
@@ -110,8 +108,7 @@ class RegionProposalNetwork(object):
     def _build(self):
         self._create_conv6()
 
-        Hp, Wp = self.Hp, self.Wp
-        self._generate_anchor_centers(self.image_height, self.image_width, Hp, Wp)
+        self.anchor_centers = self._generate_anchors(self.image_height, self.image_width)
 
         self.offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4], name='1')
         proposals = self._generate_proposals(self.offsets, Hp, Wp)
@@ -289,22 +286,23 @@ class RegionProposalNetwork(object):
         self.layers['scores'] = scores[0]
 
 
-    def _generate_anchor_centers(self, H, W, Hp, Wp):
-        # those are strides in terms of original image
-        # i.e. what x and y base image strides corresponds to 1,1 conv layer stride
-        H, W = tf.cast(H, tf.float32), tf.cast(W, tf.float32)
+    def _generate_anchors(self, height, width):
+        height, width = tf.cast(height, tf.float32), tf.cast(width, tf.float32)
+        # VGG architecture - conv5 layer has 4 maxpools, hence 16 = 2 ** 4
+        conv_height, conv_width = self.image_height // 16, self.image_width // 16
 
         grid = tf.stack(tf.meshgrid(
-            tf.linspace(-0.5, H - 0.5, Wp),
-            tf.linspace(-0.5, W - 0.5, Hp)), axis=2)
+            tf.linspace(-0.5, height - 0.5, conv_width),
+            tf.linspace(-0.5, width - 0.5, conv_height)), axis=2)
 
         # convert boxes from K x 2 to 1 x 1 x K x 2
         boxes = tf.expand_dims(tf.expand_dims(self.boxes, 0), 0)
-        # convert grid from Hp x Wp x 2 to Hp x Wp x 1 x 2
+        # convert grid from H' x W' x 2 to H' x W' x 1 x 2
         grid = tf.expand_dims(grid, 2)
 
-        # combine them into single Hp x Wp x K x 4 tensor
-        self.anchor_centers = tf.concat(
+        # combine them into single H' x W' x K x 4 tensor
+        return tf.concat(
             3,
-            [tf.tile(grid, [1, 1, self.k, 1]), tf.tile(boxes, [Hp, Wp, 1, 1])]
+            [tf.tile(grid, [1, 1, self.k, 1]),
+             tf.tile(boxes, [conv_height, conv_width, 1, 1])]
         )
