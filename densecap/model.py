@@ -72,10 +72,10 @@ class RegionProposalNetwork(object):
         self._create_train()
 
     def _create_variables(self):
-        self.H, self.W = tf.placeholder(tf.int32), tf.placeholder(tf.int32)
+        self.image_height, self.image_width = tf.placeholder(tf.int32), tf.placeholder(tf.int32)
         self.gt_box_count = tf.placeholder(tf.int32)
         # VGG architecture - conv5 layer has 4 maxpools, hence 16 = 2 ** 4
-        self.Hp, self.Wp = self.H // 16, self.W // 16
+        self.Hp, self.Wp = self.image_height // 16, self.image_width // 16
         self.boxes = tf.Variable([
             (45, 90), (90, 45), (64, 64),
             (90, 180), (180, 90), (128, 128),
@@ -111,7 +111,7 @@ class RegionProposalNetwork(object):
         self._create_conv6()
 
         Hp, Wp = self.Hp, self.Wp
-        self._generate_anchor_centers(self.H, self.W, Hp, Wp)
+        self._generate_anchor_centers(self.image_height, self.image_width, Hp, Wp)
 
         self.offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4], name='1')
         proposals = self._generate_proposals(self.offsets, Hp, Wp)
