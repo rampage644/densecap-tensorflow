@@ -73,8 +73,8 @@ class RegionProposalNetwork(object):
 
     def _create_variables(self):
         self.image_height, self.image_width = tf.placeholder(tf.int32), tf.placeholder(tf.int32)
-        self.gt_box_count = tf.placeholder(tf.int32)
-        self.gt = tf.placeholder(tf.float32, [None, 4])
+        self.ground_truth_num = tf.placeholder(tf.int32)
+        self.ground_truth = tf.placeholder(tf.float32, [None, 4])
 
         self.boxes = tf.Variable([
             (45, 90), (90, 45), (64, 64),
@@ -93,7 +93,7 @@ class RegionProposalNetwork(object):
         ))
 
         box_reg_loss = self._box_params_loss(
-            self.gt,
+            self.ground_truth,
             tf.reshape(self.anchor_centers, [-1, 4]),
             self.pos_sample_mask, self.offsets
         )
@@ -127,7 +127,7 @@ class RegionProposalNetwork(object):
         self.proposals = proposals
 
         pos_batch, neg_batch = self._generate_batches(
-            proposals, proposals_num, self.gt, self.gt_box_count, scores)
+            proposals, proposals_num, self.ground_truth, self.ground_truth_num, scores)
 
         self.pos_boxes, self.pos_scores, self.true_pos_scores = pos_batch
         self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
@@ -231,7 +231,7 @@ class RegionProposalNetwork(object):
 
     def _box_params_loss(self, ground_truth, anchor_centers, pos_sample_mask, offsets):
         N = self.proposals_num
-        M = self.gt_box_count
+        M = self.ground_truth_num
         # ground_truth shape is M x 4, where M is count and 4 are x,y,w,h
         gt = tf.expand_dims(ground_truth, axis=0)
         gt = tf.tile(gt, [N, 1, 1])
