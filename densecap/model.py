@@ -74,6 +74,8 @@ class RegionProposalNetwork(object):
     def _create_variables(self):
         self.image_height, self.image_width = tf.placeholder(tf.int32), tf.placeholder(tf.int32)
         self.gt_box_count = tf.placeholder(tf.int32)
+        self.gt = tf.placeholder(tf.float32, [None, 4])
+
         self.boxes = tf.Variable([
             (45, 90), (90, 45), (64, 64),
             (90, 180), (180, 90), (128, 128),
@@ -108,25 +110,31 @@ class RegionProposalNetwork(object):
     def _build(self):
         self._create_conv6()
 
-        self.anchor_centers = self._generate_anchors(self.image_height, self.image_width)
+        # VGG architecture - conv5 layer has 4 maxpools, hence 16 = 2 ** 4
+        conv_height, conv_width = self.image_height // 16, self.image_width // 16
+        proposals_num = conv_height * conv_width * self.k
 
-        self.offsets = tf.reshape(self.layers['offsets'], [Hp, Wp, self.k, 4], name='1')
-        proposals = self._generate_proposals(self.offsets, Hp, Wp)
-        self.scores = tf.reshape(self.layers['scores'], [Hp * Wp * self.k, 2], name='2')
+        self.anchor_centers = self._generate_anchors(
+            self.image_height, self.image_width, conv_height, conv_width)
+
+        self.offsets = tf.reshape(self.layers['offsets'], [proposals_num, 4])
+        self.scores = tf.reshape(self.layers['scores'], [proposals_num, 2])
+
+        proposals = self._generate_proposals(self.offsets, conv_height, conv_width)
 
         # TODO: implement cross-boundary filetering
         proposals, scores = self._cross_border_filter(proposals, self.scores)
         self.proposals = proposals
 
-        self.gt = tf.placeholder(tf.float32, [None, 4])  # M ground truth boxes
-        pos_batch, neg_batch = self._generate_batches(proposals, self.gt, scores)
+        pos_batch, neg_batch = self._generate_batches(
+            proposals, proposals_num, self.gt, self.gt_box_count, scores)
 
         self.pos_boxes, self.pos_scores, self.true_pos_scores = pos_batch
         self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
 
-    def _generate_batches(self, proposals, gt, scores):
-        iou_metric = self._iou(gt, self.gt_box_count,
-                               proposals, self.Hp * self.Wp * self.k)
+    def _generate_batches(self, proposals, proposals_num, gt, gt_num, scores):
+        iou_metric = self._iou(gt, gt_num,
+                               proposals, proposals_num)
 
         # now let's get rid of non-positive and non-negative samples
         # here we take either iou value if it greater than threshold
@@ -222,7 +230,7 @@ class RegionProposalNetwork(object):
         return proposals
 
     def _box_params_loss(self, ground_truth, anchor_centers, pos_sample_mask, offsets):
-        N = self.Wp * self.Hp * self.k
+        N = self.proposals_num
         M = self.gt_box_count
         # ground_truth shape is M x 4, where M is count and 4 are x,y,w,h
         gt = tf.expand_dims(ground_truth, axis=0)
@@ -286,10 +294,8 @@ class RegionProposalNetwork(object):
         self.layers['scores'] = scores[0]
 
 
-    def _generate_anchors(self, height, width):
+    def _generate_anchors(self, height, width, conv_height, conv_width):
         height, width = tf.cast(height, tf.float32), tf.cast(width, tf.float32)
-        # VGG architecture - conv5 layer has 4 maxpools, hence 16 = 2 ** 4
-        conv_height, conv_width = self.image_height // 16, self.image_width // 16
 
         grid = tf.stack(tf.meshgrid(
             tf.linspace(-0.5, height - 0.5, conv_width),
