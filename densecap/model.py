@@ -21,6 +21,36 @@ def huber_loss(x, delta=1):
 
     return term_1 + term_2
 
+def iou(ground_truth, ground_truth_count, proposals, proposals_count):
+    '''Caclulate IoU for given ground truth and proposal boxes
+
+    ground_truth: M x 4 ground truth boxes tensor
+    proposals: N x 4 ground truth boxes tensor
+
+    returns:
+    N x M IoU tensor
+    '''
+    proposals = tf.expand_dims(proposals, axis=1)
+    proposals = tf.tile(proposals, [1, ground_truth_count, 1])
+
+    ground_truth = tf.expand_dims(ground_truth, axis=0)
+    ground_truth = tf.tile(ground_truth, [proposals_count, 1, 1])
+
+    x11, y11, width1, height1 = tf.unstack(proposals, axis=2)
+    x21, y21, width2, height2 = tf.unstack(ground_truth, axis=2)
+    x12, y12 = x11 + width1, y11 + height1
+    x22, y22 = x21 + width2, y21 + height2
+
+    intersection = (
+        tf.maximum(0.0, tf.minimum(x12, x22) - tf.maximum(x11, x21)) *
+        tf.maximum(0.0, tf.minimum(y12, y22) - tf.maximum(y11, y21))
+    )
+
+    iou_metric = intersection / (
+        width1 * height1 + width2 * height2 - intersection
+    )
+    return iou_metric
+
 
 class VGG16(object):
     pools = [
@@ -133,8 +163,7 @@ class RegionProposalNetwork(object):
         self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
 
     def _generate_batches(self, proposals, proposals_num, gt, gt_num, scores):
-        iou_metric = self._iou(gt, gt_num,
-                               proposals, proposals_num)
+        iou_metric = iou(gt, gt_num, proposals, proposals_num)
 
         # now let's get rid of non-positive and non-negative samples
         # here we take either iou value if it greater than threshold
@@ -186,31 +215,6 @@ class RegionProposalNetwork(object):
             (positive_boxes, positive_scores, true_scores),
             (negative_boxes, negative_scores, tf.reduce_sum(tf.zeros_like(negative_scores), axis=1))
         )
-
-    def _iou(self, gt, gt_count, proposals, proposals_count):
-        N = proposals_count
-        M = gt_count
-
-        proposals = tf.expand_dims(proposals, axis=1)
-        proposals = tf.tile(proposals, [1, M, 1])
-
-        gt = tf.expand_dims(gt, axis=0)
-        gt = tf.tile(gt, [N, 1, 1])
-
-        x11, y11, w1, h1 = tf.unstack(proposals, axis=2)
-        x12, y12 = x11 + w1, y11 + h1
-        x21, y21, w2, h2 = tf.unstack(gt, axis=2)
-        x22, y22 = x21 + w2, y21 + h2
-
-        intersection = (
-            tf.maximum(0.0, tf.minimum(x12, x22) - tf.maximum(x11, x21)) *
-            tf.maximum(0.0, tf.minimum(y12, y22) - tf.maximum(y11, y21))
-        )
-
-        iou_metric = intersection / (
-            w1 * h1 + w2 * h2 - intersection
-        )
-        return iou_metric
 
     def _generate_proposals(self, offsets, Hp, Wp):
         # each shape is Hp x Wp x k

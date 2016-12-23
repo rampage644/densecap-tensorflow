@@ -31,5 +31,32 @@ def test_huber_loss():
     loss = sess.run(loss)
     assert equal(loss, target_loss)
 
+def test_iou():
+    # 3 x 5 x 2
+    grid = np.dstack(np.meshgrid(10 * np.arange(5), 10 * np.arange(3)))
+    boxes = np.tile(
+        np.expand_dims(np.expand_dims(np.array([10, 10]), 0), 0),
+        [3, 5, 1]
+    )
+    proposals = np.reshape(np.concatenate([grid, boxes], axis=2), (-1, 4))
+
+    proposals = tf.constant(proposals, tf.float32)
+    ground_truth = tf.constant(np.array([
+        [4, 4, 10, 10],
+        [10, 10, 10, 10]
+    ]), tf.float32)
+    iou_metric = sess.run(model.iou(ground_truth, 2, proposals, 15))
+    assert equal(iou_metric[0, 0], 0.2195)
+    assert equal(iou_metric[1, 0], 0.1363)
+    assert equal(iou_metric[5, 0], 0.1363)
+    assert equal(iou_metric[6, 0], 0.0869)
+
+    assert equal(iou_metric[6, 1], 1.0)
+
+    for (boxes, count) in [(proposals, 15), (ground_truth, 2)]:
+        iou_metric = sess.run(model.iou(boxes, count, boxes, count))
+        assert np.all(np.diag(iou_metric) == 1)
+
+
 
 
