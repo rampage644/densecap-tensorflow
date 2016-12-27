@@ -253,19 +253,19 @@ class RegionProposalNetwork(object):
 
     def _generate_proposals(self, offsets, Hp, Wp):
         # each shape is Hp x Wp x k
-        tx, ty, tw, th = tf.unstack(offsets, axis=3)
+        ty, tx, th, tw = tf.unstack(offsets, axis=3)
         # each shape is Hp x Wp x k
-        xa, ya, wa, ha = tf.unstack(self.anchors, axis=3)
+        y_anchor, x_anchor, h_anchor, w_anchor = tf.unstack(self.anchors, axis=3)
 
-        x = tf.add(xa, tf.mul(tx, wa, name='tx_times_wa'), name='xa_plus_tx_times_wa')
-        y = tf.add(ya, tf.mul(ty, ha, name='ty_times_ha'), name='ya_plus_ty_times_ha')
-        w = tf.mul(wa, tf.exp(tw), name='wa_times_exp_tw_')
-        h = tf.mul(ha, tf.exp(th), name='ha_times_exp_th_')
+        x = x_anchor + tx * w_anchor
+        y = y_anchor + ty * h_anchor
+        w = w_anchor * tf.exp(tw)
+        h = h_anchor * tf.exp(th)
 
         # shape is Hp*Wp*k x 4
-        proposals = tf.stack([x, y, w, h], axis=3)
+        proposals = tf.stack([y, x, h, w], axis=3)
         # XXX: replace explicit shape with `-1`
-        proposals = tf.reshape(proposals, [Hp * Wp * self.k, 4], name='6')
+        proposals = tf.reshape(proposals, [Hp * Wp * self.k, 4])
         return proposals
 
     def _box_params_loss(self, ground_truth, anchor_centers, pos_sample_mask, offsets):
