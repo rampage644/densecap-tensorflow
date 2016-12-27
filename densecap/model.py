@@ -280,20 +280,20 @@ class RegionProposalNetwork(object):
         # pos_sample_mask shape is N x M, True are for positive proposals
         mask = tf.expand_dims(tf.cast(pos_sample_mask, tf.float32), axis=2)
 
-        xa, ya, wa, ha = tf.unstack(anchor_centers, axis=2)
-        x, y, w, h = tf.unstack(gt, axis=2)
+        ya, xa, ha, wa = tf.unstack(anchor_centers, axis=2)
+        y, x, h, w = tf.unstack(gt, axis=2)
 
         # idea is to calculate N x M tx, ty, tw, th for ground truth boxes
         # for every proposal. Then we caclulate loss, multiply it with mask
         # to filter out non-positive samples and sum to one
 
         # each shape is N x M
-        tx = tf.div(tf.sub(x, xa, name='x_-_xa'), wa, name='x_minus_xa_div_wa')
-        ty = tf.div(tf.sub(y, ya, name='y_minus_ya'), ha, name='y_minus_ya_div_ha')
-        tw = tf.log(tf.div(w, wa, name='w_div_wa'))
-        th = tf.log(tf.div(h, ha, name='h_div_ha'))
+        tx = (x - xa) / wa
+        ty = (y - ya) / ha
+        tw = tf.log(w / wa)
+        th = tf.log(h / ha)
 
-        gt_params = tf.stack([tx, ty, tw, th], axis=2)
+        gt_params = tf.stack([ty, tx, th, tw], axis=2)
 
         offsets = tf.expand_dims(tf.reshape(offsets, [N, 4], name='7'), axis=1)
         offsets = tf.tile(offsets, [1, M, 1])
