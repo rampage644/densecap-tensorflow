@@ -52,6 +52,40 @@ def iou(ground_truth, ground_truth_count, proposals, proposals_count):
     return iou_metric
 
 
+def generate_anchors(boxes, height, width, conv_height, conv_width):
+    '''Generate anchors for given geometry
+
+    boxes: K x 2 tensor for anchor geometries, K different sizes
+    height: source image height
+    width: source image width
+    conv_height: convolution layer height
+    conv_width: convolution layer width
+
+    returns:
+    conv_height x conv_width x K x 4 tensor with boxes for all
+    positions. Last dimension 4 numbers are (y, x, h, w)
+    '''
+    k, _ = boxes.get_shape().as_list()
+
+    height, width = tf.cast(height, tf.float32), tf.cast(width, tf.float32)
+
+    grid = tf.transpose(tf.stack(tf.meshgrid(
+        tf.linspace(-0.5, height - 0.5, conv_height),
+        tf.linspace(-0.5, width - 0.5, conv_width)), axis=2), [1, 0, 2])
+
+    # convert boxes from K x 2 to 1 x 1 x K x 2
+    boxes = tf.expand_dims(tf.expand_dims(boxes, 0), 0)
+    # convert grid from H' x W' x 2 to H' x W' x 1 x 2
+    grid = tf.expand_dims(grid, 2)
+
+    # combine them into single H' x W' x K x 4 tensor
+    return tf.concat(
+        3,
+        [tf.tile(grid, [1, 1, k, 1]),
+         tf.tile(boxes, [conv_height, conv_width, 1, 1])]
+    )
+
+
 class VGG16(object):
     pools = [
         (2, 64),
@@ -124,7 +158,7 @@ class RegionProposalNetwork(object):
 
         box_reg_loss = self._box_params_loss(
             self.ground_truth,
-            tf.reshape(self.anchor_centers, [-1, 4]),
+            tf.reshape(self.anchors, [-1, 4]),
             self.pos_sample_mask, self.offsets
         )
         self.loss = tf.add(score_loss, tf.mul(self.l1_coef, box_reg_loss, name='box_loss_lambda'), name='total_loss')
@@ -144,7 +178,7 @@ class RegionProposalNetwork(object):
         conv_height, conv_width = self.image_height // 16, self.image_width // 16
         proposals_num = conv_height * conv_width * self.k
 
-        self.anchor_centers = self._generate_anchors(
+        self.anchors = generate_anchors(self.boxes,
             self.image_height, self.image_width, conv_height, conv_width)
 
         self.offsets = tf.reshape(self.layers['offsets'], [proposals_num, 4])
@@ -163,7 +197,8 @@ class RegionProposalNetwork(object):
         self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
 
     def _generate_batches(self, proposals, proposals_num, gt, gt_num, scores):
-        iou_metric = iou(gt, gt_num, proposals, proposals_num)
+        iou_metric = iou(gt, gt_num,
+                               proposals, proposals_num)
 
         # now let's get rid of non-positive and non-negative samples
         # here we take either iou value if it greater than threshold
@@ -220,7 +255,7 @@ class RegionProposalNetwork(object):
         # each shape is Hp x Wp x k
         tx, ty, tw, th = tf.unstack(offsets, axis=3)
         # each shape is Hp x Wp x k
-        xa, ya, wa, ha = tf.unstack(self.anchor_centers, axis=3)
+        xa, ya, wa, ha = tf.unstack(self.anchors, axis=3)
 
         x = tf.add(xa, tf.mul(tx, wa, name='tx_times_wa'), name='xa_plus_tx_times_wa')
         y = tf.add(ya, tf.mul(ty, ha, name='ty_times_ha'), name='ya_plus_ty_times_ha')
@@ -296,23 +331,3 @@ class RegionProposalNetwork(object):
             scope='scores'
         )  # H' x W' x 2k
         self.layers['scores'] = scores[0]
-
-
-    def _generate_anchors(self, height, width, conv_height, conv_width):
-        height, width = tf.cast(height, tf.float32), tf.cast(width, tf.float32)
-
-        grid = tf.stack(tf.meshgrid(
-            tf.linspace(-0.5, height - 0.5, conv_width),
-            tf.linspace(-0.5, width - 0.5, conv_height)), axis=2)
-
-        # convert boxes from K x 2 to 1 x 1 x K x 2
-        boxes = tf.expand_dims(tf.expand_dims(self.boxes, 0), 0)
-        # convert grid from H' x W' x 2 to H' x W' x 1 x 2
-        grid = tf.expand_dims(grid, 2)
-
-        # combine them into single H' x W' x K x 4 tensor
-        return tf.concat(
-            3,
-            [tf.tile(grid, [1, 1, self.k, 1]),
-             tf.tile(boxes, [conv_height, conv_width, 1, 1])]
-        )

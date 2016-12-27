@@ -58,5 +58,39 @@ def test_iou():
         assert np.all(np.diag(iou_metric) == 1)
 
 
+def test_generate_anchors():
+    boxes = tf.constant(
+        np.array([[10, 10], [50, 50], [15, 45]]),
+        tf.float32
+    )
+    height = tf.placeholder(tf.float32)
+    width = tf.placeholder(tf.float32)
+    conv_height = tf.placeholder(tf.int32)
+    conv_width = tf.placeholder(tf.int32)
 
+    anchors = model.generate_anchors(
+        boxes,
+        height, width, conv_height, conv_width
+    )
+
+    anchors = sess.run(anchors, {
+        height: 300,
+        width: 200,
+        conv_height: 300 // 16,
+        conv_width: 200 // 16,
+    })
+
+    assert anchors.shape == (300 // 16, 200 // 16, 3, 4)
+
+    # bottom-right position
+    assert anchors[300 // 16 - 1, 200 // 16 - 1, 0, 0] == 299.5
+    assert anchors[300 // 16 - 1, 200 // 16 - 1, 0, 1] == 199.5
+
+    # top-right position
+    assert anchors[0, 200 // 16 - 1, 0, 0] == -0.5
+    assert anchors[0, 200 // 16 - 1, 0, 1] == 199.5
+
+    # bottom-left position
+    assert anchors[300 // 16 - 1, 0, 0, 0] == 299.5
+    assert anchors[300 // 16 - 1, 0, 0, 1] == -0.5
 
