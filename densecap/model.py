@@ -158,8 +158,11 @@ class RegionProposalNetwork(object):
 
         box_reg_loss = self._box_params_loss(
             self.ground_truth,
-            tf.reshape(self.anchors, [-1, 4]),
-            self.pos_sample_mask, self.offsets
+            self.ground_truth_num,
+            self.anchors,
+            self.pos_sample_mask,
+            self.offsets,
+            (self.image_height // 16) * (self.image_width // 16) * self.k
         )
         self.loss = tf.add(score_loss, tf.mul(self.l1_coef, box_reg_loss, name='box_loss_lambda'), name='total_loss')
 
@@ -183,8 +186,9 @@ class RegionProposalNetwork(object):
 
         self.offsets = tf.reshape(self.layers['offsets'], [proposals_num, 4])
         self.scores = tf.reshape(self.layers['scores'], [proposals_num, 2])
+        self.anchors = tf.reshape(self.anchors, [proposals_num, 4])
 
-        proposals = self._generate_proposals(self.offsets, conv_height, conv_width)
+        proposals = self._generate_proposals(self.offsets, self.anchors)
 
         # TODO: implement cross-boundary filetering
         proposals, scores = self._cross_border_filter(proposals, self.scores)
@@ -251,11 +255,11 @@ class RegionProposalNetwork(object):
             (negative_boxes, negative_scores, tf.reduce_sum(tf.zeros_like(negative_scores), axis=1))
         )
 
-    def _generate_proposals(self, offsets, Hp, Wp):
+    def _generate_proposals(self, offsets, anchors):
         # each shape is Hp x Wp x k
-        ty, tx, th, tw = tf.unstack(offsets, axis=3)
+        ty, tx, th, tw = tf.unstack(offsets, axis=1)
         # each shape is Hp x Wp x k
-        y_anchor, x_anchor, h_anchor, w_anchor = tf.unstack(self.anchors, axis=3)
+        y_anchor, x_anchor, h_anchor, w_anchor = tf.unstack(anchors, axis=1)
 
         x = x_anchor + tx * w_anchor
         y = y_anchor + ty * h_anchor
@@ -263,18 +267,17 @@ class RegionProposalNetwork(object):
         h = h_anchor * tf.exp(th)
 
         # shape is Hp*Wp*k x 4
-        proposals = tf.stack([y, x, h, w], axis=3)
-        # XXX: replace explicit shape with `-1`
-        proposals = tf.reshape(proposals, [Hp * Wp * self.k, 4])
+        proposals = tf.stack([y, x, h, w], axis=1)
         return proposals
 
-    def _box_params_loss(self, ground_truth, anchor_centers, pos_sample_mask, offsets):
-        N = self.proposals_num
-        M = self.ground_truth_num
-        # ground_truth shape is M x 4, where M is count and 4 are x,y,w,h
+    def _box_params_loss(self, ground_truth, ground_truth_num,
+                         anchor_centers, pos_sample_mask, offsets, proposals_num):
+        N = proposals_num
+        M = ground_truth_num
+        # ground_truth shape is M x 4, where M is count and 4 are y,x,h,w
         gt = tf.expand_dims(ground_truth, axis=0)
         gt = tf.tile(gt, [N, 1, 1])
-        # anchor_centers shape is N x 4 where N is count and 4 are xa,ya,wa,ha
+        # anchor_centers shape is N x 4 where N is count and 4 are ya,xa,ha,wa
         anchor_centers = tf.expand_dims(anchor_centers, axis=1)
         anchor_centers = tf.tile(anchor_centers, [1, M, 1])
         # pos_sample_mask shape is N x M, True are for positive proposals

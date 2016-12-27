@@ -91,10 +91,10 @@ def main(_):
                 loss, step, summary, _ = sess.run(
                     [rpn.loss, rpn.global_step, merged, rpn.train_op], {
                         vgg16.input: [image],
-                        rpn.H: height,
-                        rpn.W: width,
-                        rpn.gt: gt_boxes,
-                        rpn.gt_box_count: len(gt_boxes)
+                        rpn.image_height: height,
+                        rpn.image_width: width,
+                        rpn.ground_truth: gt_boxes,
+                        rpn.ground_truth_num: len(gt_boxes)
                     })
 
                 writer.add_summary(summary, global_step=step)
@@ -116,14 +116,14 @@ def main(_):
                     proposals = tf.reshape(rpn.offsets, [-1, 4])
                     boxes, scores = sess.run(
                         [proposals, tf.nn.softmax(rpn.scores)], {
-                            rpn.H: height,
-                            rpn.W: width,
+                            rpn.image_height: height,
+                            rpn.image_width: width,
                             vgg16.input: [image]
                         })
                     proposals = np.squeeze(boxes[np.argsort(scores[:, 1])][-k:])
 
                     gt = tf.placeholder(tf.float32, [len(gt_boxes), 4])
-                    iou = sess.run(rpn._iou(gt, len(gt_boxes), proposals, k), {
+                    iou = sess.run(model.iou(gt, len(gt_boxes), proposals, k), {
                         gt: gt_boxes
                     })
 
