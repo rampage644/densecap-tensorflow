@@ -42,7 +42,7 @@ def train_data(filename, limit):
         filename = os.path.join(
             FLAGS.train_dir, str(record['id']) + '.jpg')
         image = scipy.misc.imread(filename, mode='RGB')
-        gt_boxes = np.array([[r['x'], r['y'], r['width'], r['height']]
+        gt_boxes = np.array([[r['y'], r['x'], r['height'], r['width']]
                              for r in record['regions']])
         yield (image, gt_boxes)
 
