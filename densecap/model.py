@@ -92,6 +92,9 @@ def generate_proposals(coefficients, anchors):
     coefficients: N x 4 tensor: N x (ty, tx, th, tw)
     anchors: N x 4 tensor with boxes N x (y, x, h, w)
 
+    anchors contains x,y of box _center_ while returned tensor x,y coordinates
+    are top-left corner.
+
     returns:
     N x 4 tensor with bounding box proposals
     '''
@@ -108,6 +111,79 @@ def generate_proposals(coefficients, anchors):
 
     proposals = tf.stack([y, x, h, w], axis=1)
     return proposals
+
+
+def generate_batches(proposals, proposals_num, gt, gt_num, scores, batch_size):
+    '''Generate batches from proposals and ground truth boxes
+
+    Idea is to drastically reduce number of proposals to evaluate. So, we find those
+    proposals that have IoU > 0.7 with _any_ ground truth and mark them as positive samples.
+    Proposals with IoU < 0.3 with _all_ ground truth boxes are considered negative. All
+    other proposals are discarded.
+
+    We generate batch with at most half of examples being positive. We also pad them with negative
+    have we not enough positive proposals.
+
+    proposals: N x 4 tensor
+    proposal_num: N
+    gt: M x 4 tensor
+    gt_num: M
+    scores: N x 2 tensor with scores object/not-object
+    batch_size: Size of a batch to generate
+
+
+    '''
+    iou_metric = iou(gt, gt_num, proposals, proposals_num)
+
+    # now let's get rid of non-positive and non-negative samples
+    # Sample is considered positive if it has IoU > 0.7 with _any_ ground truth box
+    positive_mask = tf.reduce_any(tf.greater(iou_metric, 0.7), axis=1)
+
+    # Sample would be considered negative if _all_ ground truch box
+    # have iou less than 0.3
+    negative_mask = tf.reduce_all(tf.less(iou_metric, 0.3), axis=1)
+
+    # Select only positive boxes and their corresponding predicted scores
+    positive_boxes = tf.boolean_mask(proposals, positive_mask)
+    positive_scores = tf.boolean_mask(scores, positive_mask)
+
+    # Same for negative
+    negative_boxes = tf.boolean_mask(proposals, negative_mask)
+    negative_scores = tf.boolean_mask(scores, negative_mask)
+
+    true_positive_scores = tf.reduce_mean(tf.ones_like(positive_scores), axis=1)
+    true_negative_scores = tf.reduce_mean(tf.zeros_like(negative_scores), axis=1)
+
+    B = batch_size // 2
+    # pad positive samples with negative if there are not enough
+    # TODO: shuffle? random sampling?
+    positive_boxes = tf.slice(
+        tf.concat(0, [positive_boxes, negative_boxes]), [0, 0], [B, -1],
+        name='pos_box_slice'
+    )
+    positive_predicted_scores = tf.slice(
+        tf.concat(0, [positive_scores, negative_scores]), [0, 0], [B, -1],
+        name='pos_score_slice'
+    )
+    positive_labels = tf.slice(
+        tf.concat(0, [true_positive_scores, true_negative_scores]), [0], [B],
+        name='true_score_slice'
+    )
+
+    negative_boxes = tf.slice(
+        negative_boxes, [0, 0], [B, -1], name='neg_box_slice'
+    )
+    negative_predicted_scores = tf.slice(
+        negative_scores, [0, 0], [B, -1], name='neg_score_slice'
+    )
+    negative_labels = tf.slice(
+        true_negative_scores, [0], [B]
+    )
+
+    return (
+        (positive_boxes, positive_predicted_scores, positive_labels),
+        (negative_boxes, negative_predicted_scores, negative_labels)
+    )
 
 
 class VGG16(object):
@@ -218,66 +294,13 @@ class RegionProposalNetwork(object):
         # TODO: implement cross-boundary filetering
         self.proposals, scores = self._cross_border_filter(self.proposals, self.scores)
 
-        pos_batch, neg_batch = self._generate_batches(
-            proposals, proposals_num, self.ground_truth, self.ground_truth_num, scores)
+        pos_batch, neg_batch = generate_batches(
+            proposals, proposals_num,
+            self.ground_truth, self.ground_truth_num,
+            scores, self.batch_size)
 
         self.pos_boxes, self.pos_scores, self.true_pos_scores = pos_batch
         self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
-
-    def _generate_batches(self, proposals, proposals_num, gt, gt_num, scores):
-        iou_metric = iou(gt, gt_num,
-                               proposals, proposals_num)
-
-        # now let's get rid of non-positive and non-negative samples
-        # here we take either iou value if it greater than threshold
-        # or zero. We sum over all options. Sample is considered
-        # positive if it has IoU with _any_ ground truth boxes
-        # we will need that for calculating ground truch box params and loss
-        mask = tf.greater(iou_metric, 0.7)
-        self.pos_sample_mask = mask
-        positive_mask = tf.reduce_any(mask, axis=1)
-
-        # here we compare iou metric with another threshold. Sample
-        # would be considered negative if _all_ ground truch boxes
-        # have iou less than threshold
-        neg_mask = tf.less(iou_metric, 0.3)
-        negative_mask = tf.reduce_all(neg_mask, axis=1)
-
-        positive_boxes = tf.boolean_mask(proposals, positive_mask)
-        negative_boxes = tf.boolean_mask(proposals, negative_mask)
-
-        positive_scores = tf.boolean_mask(scores, positive_mask)
-        true_positive_scores = tf.reduce_mean(tf.ones_like(positive_scores), axis=1)
-        negative_scores = tf.boolean_mask(scores, negative_mask)
-        true_negative_scores = tf.reduce_mean(tf.zeros_like(negative_scores), axis=1)
-
-        B = self.batch_size // 2
-        # pad positive samples with negative if there are not enough
-        # TODO: shuffle? random sampling?
-        positive_boxes = tf.slice(
-            tf.concat(0, [positive_boxes, negative_boxes]), [0, 0], [B, -1],
-            name='pos_box_slice'
-        )
-        positive_scores = tf.slice(
-            tf.concat(0, [positive_scores, negative_scores]), [0, 0], [B, -1],
-            name='pos_score_slice'
-        )
-        true_scores = tf.slice(
-            tf.concat(0, [true_positive_scores, true_negative_scores]), [0], [B],
-            name='true_score_slice'
-        )
-
-        negative_boxes = tf.slice(
-            negative_boxes, [0, 0], [B, -1], name='neg_box_slice'
-        )
-        negative_scores = tf.slice(
-            negative_scores, [0, 0], [B, -1], name='neg_score_slice'
-        )
-
-        return (
-            (positive_boxes, positive_scores, true_scores),
-            (negative_boxes, negative_scores, tf.reduce_sum(tf.zeros_like(negative_scores), axis=1))
-        )
 
     def _box_params_loss(self, ground_truth, ground_truth_num,
                          anchor_centers, pos_sample_mask, offsets, proposals_num):

@@ -113,3 +113,74 @@ def test_generate_proposals():
     ]))
 
 
+def test_generate_batches():
+    batch_size = 10
+
+    # 10 x 10 proposal locations, 100 x 100 pixels
+    grid = np.dstack(np.meshgrid(10 * np.arange(10), 10 * np.arange(10)))
+    boxes = np.tile(
+        np.expand_dims(np.expand_dims(np.array([10, 10]), 0), 0),
+        [10, 10, 1]
+    )
+    proposals = np.reshape(np.concatenate([grid, boxes], axis=2), (-1, 4))
+    proposals_num = len(proposals)
+    scores = np.tile([-0.5, 0], [proposals_num, 1])
+    # okay, now we have 100 proposals. let's select some of them as ground truth
+    # take 10 of them
+    ground_truth = proposals[::11]
+    scores[::11] *= -1
+
+    scores = tf.constant(scores, tf.float32)
+    proposals_num = tf.constant(proposals_num, tf.int32)
+    gt_num = tf.constant(len(ground_truth), tf.int32)
+    proposals = tf.constant(proposals, tf.float32)
+    ground_truth = tf.constant(ground_truth, tf.float32)
+
+    result = sess.run(
+        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, scores, 10))
+    (pos_boxes, pos_scores, pos_labels), (neg_boxes, neg_scores, neg_labels) = result
+
+    assert np.all(pos_boxes == np.array([
+        [0, 0, 10, 10],
+        [10, 10, 10, 10],
+        [20, 20, 10, 10],
+        [30, 30, 10, 10],
+        [40, 40, 10, 10]]
+    ))
+    assert np.all(pos_scores == np.array([[0.5, 0]] * 5))
+    assert np.all(pos_labels == np.array([1] * 5))
+
+    assert np.all(neg_boxes == np.array([
+        [10, 0, 10, 10],
+        [20, 0, 10, 10],
+        [30, 0, 10, 10],
+        [40, 0, 10, 10],
+        [50, 0, 10, 10]
+    ]))
+    assert np.all(neg_scores == np.array([[-0.5, 0]] * 5))
+    assert np.all(neg_labels == np.array([0] * 5))
+
+    # now let's try to simulate negative padding, i.e. size of batch // 2 exceeds number
+    # of positive samples
+    result = sess.run(
+        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, scores, 24))
+    (pos_boxes, pos_scores, pos_labels), (neg_boxes, neg_scores, neg_labels) = result
+
+    assert np.all(pos_boxes == np.array([
+        [0, 0, 10, 10],
+        [10, 10, 10, 10],
+        [20, 20, 10, 10],
+        [30, 30, 10, 10],
+        [40, 40, 10, 10],
+        [50, 50, 10, 10],
+        [60, 60, 10, 10],
+        [70, 70, 10, 10],
+        [80, 80, 10, 10],
+        [90, 90, 10, 10],
+        [10, 0, 10, 10],
+        [20, 0, 10, 10],
+    ]))
+    assert np.all(pos_scores == np.concatenate([np.array([[0.5, 0]] * 10), np.array([[-0.5, 0]] * 2)]))
+    assert np.all(pos_labels == np.concatenate([np.array([1] * 10), np.array([0] * 2)]))
+
+
