@@ -186,10 +186,14 @@ def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, batch_si
 
 def cross_border_filter(proposals, scores, image_height, image_width):
     '''Remove proposals that are partally out of image'''
+    im_height = tf.cast(image_height, tf.float32)
+    im_width = tf.cast(image_width, tf.float32)
     mask = (proposals[:, 0] >= 0) & (proposals[:, 1] >= 0) & \
-           (proposals[:, 0] + proposals[:, 2] <= image_height) & \
-           (proposals[:, 1] + proposals[:, 3] <= image_width)
+           (proposals[:, 0] + proposals[:, 2] <= im_height) & \
+           (proposals[:, 1] + proposals[:, 3] <= im_width)
 
+    # TODO: check if it's adequate
+    mask.set_shape([None])
     return tf.boolean_mask(proposals, mask), tf.boolean_mask(scores, mask)
 
 
@@ -303,18 +307,19 @@ class RegionProposalNetwork(object):
 
         self.proposals = generate_proposals(self.offsets, self.anchors)
 
-        self.proposals, scores = cross_border_filter(
+        # XXX: This should change proposals_num!
+        self.proposals, self.scores = cross_border_filter(
             self.proposals, self.scores, self.image_height, self.image_width)
 
         self.ground_truth = centerize_ground_truth(self.ground_truth_pre)
 
-        self.iou_metric = iou(self.ground_truth_num, self.ground_truth_num,
+        self.iou_metric = iou(self.ground_truth, self.ground_truth_num,
                               self.proposals, proposals_num)
 
         pos_batch, neg_batch = generate_batches(
-            proposals, proposals_num,
+            self.proposals, proposals_num,
             self.ground_truth, self.ground_truth_num,
-            self.iou_metric, scores, self.batch_size)
+            self.iou_metric, self.scores, self.batch_size)
 
         self.pos_boxes, self.pos_scores, self.true_pos_scores = pos_batch
         self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
