@@ -86,6 +86,30 @@ def generate_anchors(boxes, height, width, conv_height, conv_width):
     )
 
 
+def generate_proposals(coefficients, anchors):
+    '''Generate proposals from static anchors and normalizing coefficients
+
+    coefficients: N x 4 tensor: N x (ty, tx, th, tw)
+    anchors: N x 4 tensor with boxes N x (y, x, h, w)
+
+    returns:
+    N x 4 tensor with bounding box proposals
+    '''
+
+    y_coef, x_coef, h_coef, w_coef = tf.unstack(coefficients, axis=1)
+    y_anchor, x_anchor, h_anchor, w_anchor = tf.unstack(anchors, axis=1)
+
+    w = w_anchor * tf.exp(w_coef)
+    h = h_anchor * tf.exp(h_coef)
+    # XXX: should we account for x_a and y_a being a center and not top-left corner coordinate?
+    # XXX: use h_anchor and w_anchor instead of h and w
+    x = x_anchor + x_coef * w_anchor - w / 2
+    y = y_anchor + y_coef * h_anchor - h / 2
+
+    proposals = tf.stack([y, x, h, w], axis=1)
+    return proposals
+
+
 class VGG16(object):
     pools = [
         (2, 64),
@@ -156,6 +180,7 @@ class RegionProposalNetwork(object):
             predicted_scores, true_labels
         ))
 
+        # add L2 regularizer
         box_reg_loss = self._box_params_loss(
             self.ground_truth,
             self.ground_truth_num,
@@ -188,11 +213,10 @@ class RegionProposalNetwork(object):
         self.scores = tf.reshape(self.layers['scores'], [proposals_num, 2])
         self.anchors = tf.reshape(self.anchors, [proposals_num, 4])
 
-        proposals = self._generate_proposals(self.offsets, self.anchors)
+        self.proposals = generate_proposals(self.offsets, self.anchors)
 
         # TODO: implement cross-boundary filetering
-        proposals, scores = self._cross_border_filter(proposals, self.scores)
-        self.proposals = proposals
+        self.proposals, scores = self._cross_border_filter(self.proposals, self.scores)
 
         pos_batch, neg_batch = self._generate_batches(
             proposals, proposals_num, self.ground_truth, self.ground_truth_num, scores)
@@ -255,21 +279,6 @@ class RegionProposalNetwork(object):
             (negative_boxes, negative_scores, tf.reduce_sum(tf.zeros_like(negative_scores), axis=1))
         )
 
-    def _generate_proposals(self, offsets, anchors):
-        # each shape is Hp x Wp x k
-        ty, tx, th, tw = tf.unstack(offsets, axis=1)
-        # each shape is Hp x Wp x k
-        y_anchor, x_anchor, h_anchor, w_anchor = tf.unstack(anchors, axis=1)
-
-        x = x_anchor + tx * w_anchor
-        y = y_anchor + ty * h_anchor
-        w = w_anchor * tf.exp(tw)
-        h = h_anchor * tf.exp(th)
-
-        # shape is Hp*Wp*k x 4
-        proposals = tf.stack([y, x, h, w], axis=1)
-        return proposals
-
     def _box_params_loss(self, ground_truth, ground_truth_num,
                          anchor_centers, pos_sample_mask, offsets, proposals_num):
         N = proposals_num
@@ -319,6 +328,7 @@ class RegionProposalNetwork(object):
         )
         self.layers['conv6_1'] = conv
 
+        # XXX: remove non-linearity?
         offsets = tf.contrib.layers.conv2d(
             conv,
             4 * self.k,

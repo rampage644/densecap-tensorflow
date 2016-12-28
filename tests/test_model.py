@@ -94,3 +94,22 @@ def test_generate_anchors():
     assert anchors[300 // 16 - 1, 0, 0, 0] == 299.5
     assert anchors[300 // 16 - 1, 0, 0, 1] == -0.5
 
+
+def test_generate_proposals():
+    N = 2
+    anchors = tf.constant(
+        np.array([[10, 10, 100, 100], [30, 40, 50, 150]]),
+        tf.float32
+    )
+
+    coef = tf.constant(np.ones((N, 4)), tf.float32)
+    proposals = sess.run(
+        model.generate_proposals(coef, anchors))
+    assert proposals.shape == (N, 4)
+    print(proposals)
+    assert np.allclose(proposals, np.array([
+        [-25.914091422952254, -25.914091422952254, 271.82818604, 271.82818604],
+        [12.042954288523873, -13.87113713442838, 135.91409302, 407.74224854]
+    ]))
+
+
