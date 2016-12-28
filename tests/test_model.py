@@ -114,8 +114,6 @@ def test_generate_proposals():
 
 
 def test_generate_batches():
-    batch_size = 10
-
     # 10 x 10 proposal locations, 100 x 100 pixels
     grid = np.dstack(np.meshgrid(10 * np.arange(10), 10 * np.arange(10)))
     boxes = np.tile(
@@ -184,3 +182,27 @@ def test_generate_batches():
     assert np.all(pos_labels == np.concatenate([np.array([1] * 10), np.array([0] * 2)]))
 
 
+def test_cross_border_filter():
+    # 10 x 10 proposal locations, 100 x 100 pixels
+    grid = np.dstack(np.meshgrid(10 * np.arange(-2, 12), 10 * np.arange(-2, 12)))
+    boxes = np.tile(
+        np.expand_dims(np.expand_dims(np.array([10, 10]), 0), 0),
+        [14, 14, 1]
+    )
+    np_proposals = np.reshape(np.concatenate([grid, boxes], axis=2), (-1, 4))
+    proposals_num = len(np_proposals)
+    scores = np.tile([1, 0], [proposals_num, 1])
+
+    proposals = tf.constant(np_proposals, tf.float32)
+    scores = tf.constant(scores, tf.float32)
+    height = tf.constant(100, tf.float32)
+    width = tf.constant(100, tf.float32)
+    fproposals, scores = sess.run(model.cross_border_filter(proposals, scores, height, width))
+
+    assert fproposals.shape == (100, 4)
+    assert scores.shape == (100, 2)
+
+    mask = (np_proposals[:, 0] >= 0) & (np_proposals[:, 1] >= 0) & \
+           (np_proposals[:, 0] + np_proposals[:, 2] <= 100) & \
+           (np_proposals[:, 1] + np_proposals[:, 3] <= 100)
+    assert np.all(np_proposals[mask] == fproposals)

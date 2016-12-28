@@ -186,6 +186,15 @@ def generate_batches(proposals, proposals_num, gt, gt_num, scores, batch_size):
     )
 
 
+def cross_border_filter(proposals, scores, image_height, image_width):
+    '''Remove proposals that are partally out of image'''
+    mask = (proposals[:, 0] >= 0) & (proposals[:, 1] >= 0) & \
+           (proposals[:, 0] + proposals[:, 2] <= image_height) & \
+           (proposals[:, 1] + proposals[:, 3] <= image_width)
+
+    return tf.boolean_mask(proposals, mask), tf.boolean_mask(scores, mask)
+
+
 class VGG16(object):
     pools = [
         (2, 64),
@@ -291,8 +300,8 @@ class RegionProposalNetwork(object):
 
         self.proposals = generate_proposals(self.offsets, self.anchors)
 
-        # TODO: implement cross-boundary filetering
-        self.proposals, scores = self._cross_border_filter(self.proposals, self.scores)
+        self.proposals, scores = cross_border_filter(
+            self.proposals, self.scores, self.image_height, self.image_width)
 
         pos_batch, neg_batch = generate_batches(
             proposals, proposals_num,
@@ -334,9 +343,6 @@ class RegionProposalNetwork(object):
         offsets = tf.tile(offsets, [1, M, 1])
 
         return huber_loss((offsets - gt_params) * mask)
-
-    def _cross_border_filter(self, proposals, scores):
-        return proposals, scores
 
     def _create_conv6(self):
         # throw away first dimention - don't allow multiple images,
