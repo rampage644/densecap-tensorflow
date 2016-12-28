@@ -36,8 +36,11 @@ def iou(ground_truth, ground_truth_count, proposals, proposals_count):
     ground_truth = tf.expand_dims(ground_truth, axis=0)
     ground_truth = tf.tile(ground_truth, [proposals_count, 1, 1])
 
-    x11, y11, width1, height1 = tf.unstack(proposals, axis=2)
-    x21, y21, width2, height2 = tf.unstack(ground_truth, axis=2)
+    yc11, xc11, height1, width1 = tf.unstack(proposals, axis=2)
+    yc21, xc21, height2, width2 = tf.unstack(ground_truth, axis=2)
+
+    x11, y11 = xc11 - width1 // 2, yc11 - height1 // 2
+    x21, y21 = xc21 - width2 // 2, yc21 - height2 // 2
     x12, y12 = x11 + width1, y11 + height1
     x22, y22 = x21 + width2, y21 + height2
 
@@ -104,10 +107,8 @@ def generate_proposals(coefficients, anchors):
 
     w = w_anchor * tf.exp(w_coef)
     h = h_anchor * tf.exp(h_coef)
-    # XXX: should we account for x_a and y_a being a center and not top-left corner coordinate?
-    # XXX: use h_anchor and w_anchor instead of h and w
-    x = x_anchor + x_coef * w_anchor - w / 2
-    y = y_anchor + y_coef * h_anchor - h / 2
+    x = x_anchor + x_coef * w_anchor
+    y = y_anchor + y_coef * h_anchor
 
     proposals = tf.stack([y, x, h, w], axis=1)
     return proposals

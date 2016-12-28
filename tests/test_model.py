@@ -106,10 +106,9 @@ def test_generate_proposals():
     proposals = sess.run(
         model.generate_proposals(coef, anchors))
     assert proposals.shape == (N, 4)
-    print(proposals)
     assert np.allclose(proposals, np.array([
-        [-25.914091422952254, -25.914091422952254, 271.82818604, 271.82818604],
-        [12.042954288523873, -13.87113713442838, 135.91409302, 407.74224854]
+        [110, 110, 271.82818604, 271.82818604],
+        [80, 190, 135.91409302, 407.74224854]
     ]))
 
 
