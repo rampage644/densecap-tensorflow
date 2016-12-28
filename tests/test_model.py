@@ -133,8 +133,9 @@ def test_generate_batches():
     proposals = tf.constant(proposals, tf.float32)
     ground_truth = tf.constant(ground_truth, tf.float32)
 
+    iou = model.iou(ground_truth, gt_num, proposals, proposals_num)
     result = sess.run(
-        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, scores, 10))
+        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, iou, scores, 10))
     (pos_boxes, pos_scores, pos_labels), (neg_boxes, neg_scores, neg_labels) = result
 
     assert np.all(pos_boxes == np.array([
@@ -160,7 +161,7 @@ def test_generate_batches():
     # now let's try to simulate negative padding, i.e. size of batch // 2 exceeds number
     # of positive samples
     result = sess.run(
-        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, scores, 24))
+        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, iou, scores, 24))
     (pos_boxes, pos_scores, pos_labels), (neg_boxes, neg_scores, neg_labels) = result
 
     assert np.all(pos_boxes == np.array([

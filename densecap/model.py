@@ -114,7 +114,7 @@ def generate_proposals(coefficients, anchors):
     return proposals
 
 
-def generate_batches(proposals, proposals_num, gt, gt_num, scores, batch_size):
+def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, batch_size):
     '''Generate batches from proposals and ground truth boxes
 
     Idea is to drastically reduce number of proposals to evaluate. So, we find those
@@ -129,20 +129,17 @@ def generate_batches(proposals, proposals_num, gt, gt_num, scores, batch_size):
     proposal_num: N
     gt: M x 4 tensor
     gt_num: M
+    iou: N x M tensor of IoU between every proposal and ground truth
     scores: N x 2 tensor with scores object/not-object
     batch_size: Size of a batch to generate
-
-
     '''
-    iou_metric = iou(gt, gt_num, proposals, proposals_num)
-
     # now let's get rid of non-positive and non-negative samples
     # Sample is considered positive if it has IoU > 0.7 with _any_ ground truth box
-    positive_mask = tf.reduce_any(tf.greater(iou_metric, 0.7), axis=1)
+    positive_mask = tf.reduce_any(tf.greater(iou, 0.7), axis=1)
 
     # Sample would be considered negative if _all_ ground truch box
     # have iou less than 0.3
-    negative_mask = tf.reduce_all(tf.less(iou_metric, 0.3), axis=1)
+    negative_mask = tf.reduce_all(tf.less(iou, 0.3), axis=1)
 
     # Select only positive boxes and their corresponding predicted scores
     positive_boxes = tf.boolean_mask(proposals, positive_mask)
@@ -277,7 +274,6 @@ class RegionProposalNetwork(object):
             self.ground_truth,
             self.ground_truth_num,
             self.anchors,
-            self.pos_sample_mask,
             self.offsets,
             (self.image_height // 16) * (self.image_width // 16) * self.k
         )
@@ -312,17 +308,20 @@ class RegionProposalNetwork(object):
 
         self.ground_truth = centerize_ground_truth(self.ground_truth_pre)
 
+        self.iou_metric = iou(self.ground_truth_num, self.ground_truth_num,
+                              self.proposals, proposals_num)
+
         pos_batch, neg_batch = generate_batches(
             proposals, proposals_num,
             self.ground_truth, self.ground_truth_num,
-            scores, self.batch_size)
+            self.iou_metric, scores, self.batch_size)
 
         self.pos_boxes, self.pos_scores, self.true_pos_scores = pos_batch
         self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
 
 
     def _box_params_loss(self, ground_truth, ground_truth_num,
-                         anchor_centers, pos_sample_mask, offsets, proposals_num):
+                         anchor_centers, offsets, proposals_num):
         N = proposals_num
         M = ground_truth_num
         # ground_truth shape is M x 4, where M is count and 4 are y,x,h,w
@@ -332,6 +331,7 @@ class RegionProposalNetwork(object):
         anchor_centers = tf.expand_dims(anchor_centers, axis=1)
         anchor_centers = tf.tile(anchor_centers, [1, M, 1])
         # pos_sample_mask shape is N x M, True are for positive proposals
+        pos_sample_mask = tf.greater(self.iou_metric, 0.7)
         mask = tf.expand_dims(tf.cast(pos_sample_mask, tf.float32), axis=2)
 
         ya, xa, ha, wa = tf.unstack(anchor_centers, axis=2)
