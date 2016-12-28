@@ -196,6 +196,12 @@ def cross_border_filter(proposals, scores, image_height, image_width):
     return tf.boolean_mask(proposals, mask), tf.boolean_mask(scores, mask)
 
 
+def centerize_ground_truth(ground_truth_pre):
+    y, x, height, width = tf.unstack(ground_truth_pre, axis=1)
+    yc, xc = y + height // 2, x + width // 2
+    return tf.stack([yc, xc, height, width], axis=1)
+
+
 class VGG16(object):
     pools = [
         (2, 64),
@@ -248,7 +254,7 @@ class RegionProposalNetwork(object):
     def _create_variables(self):
         self.image_height, self.image_width = tf.placeholder(tf.int32), tf.placeholder(tf.int32)
         self.ground_truth_num = tf.placeholder(tf.int32)
-        self.ground_truth = tf.placeholder(tf.float32, [None, 4])
+        self.ground_truth_pre = tf.placeholder(tf.float32, [None, 4])
 
         self.boxes = tf.Variable([
             (45, 90), (90, 45), (64, 64),
@@ -304,6 +310,8 @@ class RegionProposalNetwork(object):
         self.proposals, scores = cross_border_filter(
             self.proposals, self.scores, self.image_height, self.image_width)
 
+        self.ground_truth = centerize_ground_truth(self.ground_truth_pre)
+
         pos_batch, neg_batch = generate_batches(
             proposals, proposals_num,
             self.ground_truth, self.ground_truth_num,
@@ -311,6 +319,7 @@ class RegionProposalNetwork(object):
 
         self.pos_boxes, self.pos_scores, self.true_pos_scores = pos_batch
         self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
+
 
     def _box_params_loss(self, ground_truth, ground_truth_num,
                          anchor_centers, pos_sample_mask, offsets, proposals_num):

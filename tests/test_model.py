@@ -205,3 +205,16 @@ def test_cross_border_filter():
            (np_proposals[:, 0] + np_proposals[:, 2] <= 100) & \
            (np_proposals[:, 1] + np_proposals[:, 3] <= 100)
     assert np.all(np_proposals[mask] == fproposals)
+
+
+def test_centerize_ground_truth():
+    ground_truth = tf.constant(np.array([
+        [4, 4, 10, 10],
+        [10, 10, 10, 10]
+    ]), tf.float32)
+
+    centered = sess.run(model.centerize_ground_truth(ground_truth))
+    assert np.all(centered == np.array([
+        [9, 9, 10, 10],
+        [15, 15, 10, 10],
+    ]))
