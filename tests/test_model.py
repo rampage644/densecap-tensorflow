@@ -134,8 +134,9 @@ def test_generate_batches():
     ground_truth = tf.constant(ground_truth, tf.float32)
 
     iou = model.iou(ground_truth, gt_num, proposals, proposals_num)
+    mask = tf.cast(tf.ones([proposals_num]), tf.bool)
     result = sess.run(
-        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, iou, scores, 10))
+        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, iou, scores, mask, 10))
     (pos_boxes, pos_scores, pos_labels), (neg_boxes, neg_scores, neg_labels) = result
 
     assert np.all(pos_boxes == np.array([
@@ -161,7 +162,7 @@ def test_generate_batches():
     # now let's try to simulate negative padding, i.e. size of batch // 2 exceeds number
     # of positive samples
     result = sess.run(
-        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, iou, scores, 24))
+        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, iou, scores, mask, 24))
     (pos_boxes, pos_scores, pos_labels), (neg_boxes, neg_scores, neg_labels) = result
 
     assert np.all(pos_boxes == np.array([
@@ -197,8 +198,11 @@ def test_cross_border_filter():
     scores = tf.constant(scores, tf.float32)
     height = tf.constant(100, tf.float32)
     width = tf.constant(100, tf.float32)
-    fproposals, scores = sess.run(model.cross_border_filter(proposals, scores, height, width))
+    mask = model.cross_border_filter(proposals, height, width)
+    fproposals, scores = tf.boolean_mask(proposals, mask), tf.boolean_mask(scores, mask)
+    fproposals, scores = sess.run([fproposals, scores])
 
+    assert mask.get_shape().as_list() == [196]
     assert fproposals.shape == (100, 4)
     assert scores.shape == (100, 2)
 
