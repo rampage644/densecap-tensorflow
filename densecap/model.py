@@ -324,35 +324,39 @@ class RegionProposalNetwork(object):
 
     def _box_params_loss(self, ground_truth, ground_truth_num,
                          anchor_centers, offsets, proposals_num):
-        N = proposals_num
-        M = ground_truth_num
         # ground_truth shape is M x 4, where M is count and 4 are y,x,h,w
-        gt = tf.expand_dims(ground_truth, axis=0)
-        gt = tf.tile(gt, [N, 1, 1])
+        ground_truth = tf.expand_dims(ground_truth, axis=0)
+        ground_truth = tf.tile(ground_truth, [proposals_num, 1, 1])
         # anchor_centers shape is N x 4 where N is count and 4 are ya,xa,ha,wa
         anchor_centers = tf.expand_dims(anchor_centers, axis=1)
-        anchor_centers = tf.tile(anchor_centers, [1, M, 1])
-        # pos_sample_mask shape is N x M, True are for positive proposals
+        anchor_centers = tf.tile(anchor_centers, [1, ground_truth_num, 1])
+        # pos_sample_mask shape is N x M, True are for positive proposals and, hence,
+        # for anchor centers
         pos_sample_mask = tf.greater(self.iou_metric, 0.7)
-        mask = tf.expand_dims(tf.cast(pos_sample_mask, tf.float32), axis=2)
+        # convert mask shape from N to N x 1 to make it broadcastable with pos_sample_mask
+        mask = tf.expand_dims(self.cross_boundary_mask, axis=1)
+        # convert resulting shape to align it with offsets
+        mask = tf.expand_dims(tf.cast(pos_sample_mask & mask, tf.float32), axis=2)
 
-        ya, xa, ha, wa = tf.unstack(anchor_centers, axis=2)
-        y, x, h, w = tf.unstack(gt, axis=2)
+        y_anchor, x_anchor, height_anchor, width_anchor = tf.unstack(anchor_centers, axis=2)
+        y_ground_truth, x_ground_truth, height_ground_truth, width_ground_truth = tf.unstack(
+            ground_truth, axis=2)
 
         # idea is to calculate N x M tx, ty, tw, th for ground truth boxes
         # for every proposal. Then we caclulate loss, multiply it with mask
         # to filter out non-positive samples and sum to one
 
         # each shape is N x M
-        tx = (x - xa) / wa
-        ty = (y - ya) / ha
-        tw = tf.log(w / wa)
-        th = tf.log(h / ha)
+        tx_ground_truth = (x_ground_truth - x_anchor) / width_anchor
+        ty_ground_truth = (y_ground_truth - y_anchor) / height_anchor
+        tw_ground_truth = tf.log(width_ground_truth / width_anchor)
+        th_ground_truth = tf.log(height_ground_truth / height_anchor)
 
-        gt_params = tf.stack([ty, tx, th, tw], axis=2)
+        gt_params = tf.stack(
+            [ty_ground_truth, tx_ground_truth, th_ground_truth, tw_ground_truth], axis=2)
 
-        offsets = tf.expand_dims(tf.reshape(offsets, [N, 4], name='7'), axis=1)
-        offsets = tf.tile(offsets, [1, M, 1])
+        offsets = tf.expand_dims(offsets, axis=1)
+        offsets = tf.tile(offsets, [1, ground_truth_num, 1])
 
         return huber_loss((offsets - gt_params) * mask)
 
