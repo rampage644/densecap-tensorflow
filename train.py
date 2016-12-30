@@ -114,9 +114,8 @@ def main(_):
 
                 if not step % FLAGS.eval_every:
                     k = 50
-                    proposals = tf.reshape(rpn.offsets, [-1, 4])
                     boxes, scores = sess.run(
-                        [proposals, tf.nn.softmax(rpn.scores)], {
+                        [rpn.proposals, tf.nn.softmax(rpn.scores)], {
                             rpn.image_height: height,
                             rpn.image_width: width,
                             vgg16.input: [image]
