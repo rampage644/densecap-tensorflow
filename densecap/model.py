@@ -136,6 +136,7 @@ def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, cross_bo
     '''
     # now let's get rid of non-positive and non-negative samples
     # Sample is considered positive if it has IoU > 0.7 with _any_ ground truth box
+    # XXX: maximal IoU ground truth proposal should be treated as positive
     positive_mask = tf.reduce_any(tf.greater(iou, 0.7), axis=1) & cross_boundary_mask
 
     # Sample would be considered negative if _all_ ground truch box
@@ -156,6 +157,7 @@ def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, cross_bo
     B = batch_size // 2
     # pad positive samples with negative if there are not enough
     # TODO: shuffle? random sampling?
+    # XXX: look at random_crop, random_shuffle
     positive_boxes = tf.slice(
         tf.concat(0, [positive_boxes, negative_boxes]), [0, 0], [B, -1],
         name='pos_box_slice'
@@ -241,8 +243,10 @@ class RegionProposalNetwork(object):
         self._create_variables()
 
         self.input = vgg_conv_layer
+        # XXX: switch to 512?
         self.filters_num = 256
         self.ksize = [3, 3]
+        # XXX: increase/decrease?
         self.learning_rate = 0.001
         self.batch_size = 256
         self.l1_coef = 10.0
@@ -282,6 +286,7 @@ class RegionProposalNetwork(object):
             self.offsets,
             (self.image_height // 16) * (self.image_width // 16) * self.k
         )
+        # XXX: normalize loss by Ncls (256 == batch_size) and Nreg (number of anchor locations)
         self.loss = tf.add(score_loss, tf.mul(self.l1_coef, box_reg_loss, name='box_loss_lambda'), name='total_loss')
 
         tf.summary.scalar('score_loss', score_loss)
@@ -289,6 +294,7 @@ class RegionProposalNetwork(object):
         tf.summary.scalar('loss', self.loss)
 
     def _create_train(self):
+        # XXX: change to vanilla SGD?
         optimizer = tf.train.AdamOptimizer(self.learning_rate)
         self.train_op = optimizer.minimize(self.loss, global_step=self.global_step)
 
@@ -374,6 +380,7 @@ class RegionProposalNetwork(object):
         self.layers['conv6_1'] = conv
 
         # XXX: remove non-linearity?
+        # XXX: weights initializer
         offsets = tf.contrib.layers.conv2d(
             conv,
             4 * self.k,

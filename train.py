@@ -41,6 +41,7 @@ def train_data(filename, limit):
 
         filename = os.path.join(
             FLAGS.train_dir, str(record['id']) + '.jpg')
+        # XXX: resize to have 600/720 longer side
         image = scipy.misc.imread(filename, mode='RGB')
         gt_boxes = np.array([[r['y'], r['x'], r['height'], r['width']]
                              for r in record['regions']])
