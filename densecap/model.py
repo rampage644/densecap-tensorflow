@@ -378,14 +378,17 @@ class RegionProposalNetwork(object):
             conv,
             4 * self.k,
             [1] * 2,
+            weights_regularizer=tf.contrib.layers.l2_regularizer(1.0),
+            activation_fn=None,
             scope='offsets'
         )  # H' x W' x 4k
-        self.layers['offsets'] = offsets[0]
+        self.layers['offsets'] = tf.minimum(offsets[0], 10.0)
 
         scores = tf.contrib.layers.conv2d(
             conv,
             2 * self.k,
             [1] * 2,
+            activation_fn=None,
             scope='scores'
         )  # H' x W' x 2k
         self.layers['scores'] = scores[0]
