@@ -286,8 +286,10 @@ class RegionProposalNetwork(object):
             self.offsets,
             (self.image_height // 16) * (self.image_width // 16) * self.k
         )
-        # XXX: normalize loss by Ncls (256 == batch_size) and Nreg (number of anchor locations)
-        self.loss = tf.add(score_loss, tf.mul(self.l1_coef, box_reg_loss, name='box_loss_lambda'), name='total_loss')
+        self.loss = (
+            score_loss / self.batch_size +
+            self.l1_coef * box_reg_loss / (self.image_height // 16) * (self.image_width // 16)
+        )
 
         tf.summary.scalar('score_loss', score_loss)
         tf.summary.scalar('box_regression_loss', box_reg_loss)
