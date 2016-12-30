@@ -305,9 +305,12 @@ class RegionProposalNetwork(object):
             self.offsets,
             (self.image_height // 16) * (self.image_width // 16) * self.k
         )
+
+        reg_num = tf.cast((self.image_height // 16) * (self.image_width // 16), tf.float32)
+        cls_num = tf.cast(self.batch_size, tf.float32)
         self.loss = (
-            score_loss / self.batch_size +
-            self.l1_coef * box_reg_loss / (self.image_height // 16) * (self.image_width // 16)
+            score_loss / cls_num +
+            self.l1_coef * box_reg_loss / reg_num
         )
 
         tf.summary.scalar('score_loss', score_loss)
