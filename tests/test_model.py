@@ -223,3 +223,53 @@ def test_centerize_ground_truth():
         [9, 9, 10, 10],
         [15, 15, 10, 10],
     ]))
+
+
+def test_recall():
+    grid = np.dstack(np.meshgrid(10 * np.arange(10), 10 * np.arange(10)))
+    boxes = np.tile(
+        np.expand_dims(np.expand_dims(np.array([10, 10]), 0), 0),
+        [10, 10, 1]
+    )
+    np_proposals = np.reshape(np.concatenate([grid, boxes], axis=2), (-1, 4))
+    np_proposals_num = len(np_proposals)
+    # okay, now we have 100 proposals. let's select some of them as ground truth
+    # take 10 of them
+    np_ground_truth = np_proposals[::11]
+    np_ground_truth_num = len(np_ground_truth)
+
+
+    proposals = tf.placeholder(tf.float32, [None, 4])
+    ground_truth = tf.placeholder(tf.float32, [None, 4])
+    proposals_num = tf.placeholder(tf.int32)
+    ground_truth_num = tf.placeholder(tf.int32)
+
+    recall = model.recall(proposals, proposals_num, ground_truth, ground_truth_num, 0.7)
+    assert equal(sess.run(recall, {
+        proposals: np_proposals,
+        proposals_num: np_proposals_num,
+        ground_truth: np_proposals,
+        ground_truth_num: np_proposals_num,
+    }), 1.0)
+    assert equal(sess.run(recall, {
+        proposals: np_ground_truth,
+        proposals_num: np_ground_truth_num,
+        ground_truth: np_ground_truth,
+        ground_truth_num: np_ground_truth_num,
+    }), 1.0)
+    # here we have 100 proposals and only 10 ground_truth
+    # we capture all relevant boxes hence recall is 1
+    assert equal(sess.run(recall, {
+        proposals: np_proposals,
+        proposals_num: np_proposals_num,
+        ground_truth: np_ground_truth,
+        ground_truth_num: np_ground_truth_num,
+    }), 1.0)
+    # here we have 10 proposals while 100 total samples
+    # we capture only 1/10th of all
+    assert equal(sess.run(recall, {
+        proposals: np_ground_truth,
+        proposals_num: np_ground_truth_num,
+        ground_truth: np_proposals,
+        ground_truth_num: np_proposals_num,
+    }), 0.1)

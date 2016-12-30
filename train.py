@@ -121,14 +121,20 @@ def main(_):
                             rpn.image_width: width,
                             vgg16.input: [image]
                         })
-                    proposals = np.squeeze(boxes[np.argsort(scores[:, 1])][-k:])
+                    np_proposals = np.squeeze(boxes[np.argsort(scores[:, 1])][-k:])
 
-                    gt = tf.placeholder(tf.float32, [len(gt_boxes), 4])
-                    iou = sess.run(model.iou(gt, len(gt_boxes), proposals, k), {
-                        gt: gt_boxes
-                    })
+                    proposals = tf.placeholder(tf.float32, [None, 4])
+                    ground_truth = tf.placeholder(tf.float32, [None, 4])
+                    proposals_num = tf.placeholder(tf.int32)
+                    ground_truth_num = tf.placeholder(tf.int32)
 
-                    recall = np.any(iou > 0.7, axis=0).astype(np.float32).sum() / len(gt_boxes)
+                    recall = sess.run(model.recall(
+                        proposals, proposals_num, ground_truth, ground_truth_num, 0.7), {
+                            proposals: np_proposals,
+                            proposals_num: k,
+                            ground_truth: gt_boxes,
+                            ground_truth_num: len(gt_boxes)
+                        })
 
                     summary = tf.Summary(value=[
                         tf.Summary.Value(tag='recall', simple_value=recall),
