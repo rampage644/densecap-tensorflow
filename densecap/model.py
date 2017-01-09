@@ -270,6 +270,7 @@ class RegionProposalNetwork(object):
         self.batch_size = 256
         self.l1_coef = 10.0
         self.k, _ = self.boxes.get_shape().as_list()
+        self.l2_loss = 0.1
 
         self.layers = {}
         self._build()
@@ -313,7 +314,6 @@ class RegionProposalNetwork(object):
             predicted_scores, true_labels
         ))
 
-        # add L2 regularizer
         box_reg_loss = self._box_params_loss(
             self.ground_truth,
             self.ground_truth_num,
@@ -322,15 +322,22 @@ class RegionProposalNetwork(object):
             (self.image_height // 16) * (self.image_width // 16) * self.k
         )
 
+        reg_loss = sum(map(
+            tf.reduce_sum,
+            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        ))
+
         reg_num = tf.cast((self.image_height // 16) * (self.image_width // 16), tf.float32)
         cls_num = tf.cast(self.batch_size, tf.float32)
         self.loss = (
             score_loss / cls_num +
-            self.l1_coef * box_reg_loss / reg_num
+            self.l1_coef * box_reg_loss / reg_num +
+            reg_loss
         )
 
         # XXX: move to dedicated method
         tf.summary.scalar('score_loss', score_loss)
+        tf.summary.scalar('l2_loss', reg_loss)
         tf.summary.scalar('box_regression_loss', box_reg_loss)
 
 
@@ -416,17 +423,17 @@ class RegionProposalNetwork(object):
             self.input,
             self.filters_num,
             self.ksize,
+            weights_initializer=tf.truncated_normal_initializer(stddev=0.01),
             scope='conv6_1'
         )
         self.layers['conv6_1'] = conv
 
-        # XXX: remove non-linearity?
-        # XXX: weights initializer
         offsets = tf.contrib.layers.conv2d(
             conv,
             4 * self.k,
             [1] * 2,
-            weights_regularizer=tf.contrib.layers.l2_regularizer(1.0),
+            weights_regularizer=tf.contrib.layers.l2_regularizer(self.l2_loss),
+            weights_initializer=tf.truncated_normal_initializer(stddev=0.01),
             activation_fn=None,
             scope='offsets'
         )  # H' x W' x 4k
@@ -436,6 +443,8 @@ class RegionProposalNetwork(object):
             conv,
             2 * self.k,
             [1] * 2,
+            weights_regularizer=tf.contrib.layers.l2_regularizer(self.l2_loss),
+            weights_initializer=tf.truncated_normal_initializer(stddev=0.01),
             activation_fn=None,
             scope='scores'
         )  # H' x W' x 2k
