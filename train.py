@@ -43,6 +43,9 @@ def train_data(filename, limit):
             FLAGS.train_dir, str(record['id']) + '.jpg')
         # XXX: resize to have 600/720 longer side
         image = scipy.misc.imread(filename, mode='RGB')
+        height, width, _ = image.shape
+        fraction = 720.0 / max(height, width)
+        image = scipy.misc.imresize(image, fraction)
         gt_boxes = np.array([[r['y'], r['x'], r['height'], r['width']]
                              for r in record['regions']])
         yield (image, gt_boxes)
@@ -136,7 +139,7 @@ def main(_):
                         })
 
                     summary = tf.Summary(value=[
-                        tf.Summary.Value(tag='recall', simple_value=recall),
+                        tf.Summary.Value(tag='recall', simple_value=float(recall)),
                     ])
                     writer.add_summary(summary, global_step=step)
 
