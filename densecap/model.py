@@ -263,10 +263,10 @@ class RegionProposalNetwork(object):
 
         self.input = vgg_conv_layer
         # XXX: switch to 512?
-        self.filters_num = 256
+        self.filters_num = 512
         self.ksize = [3, 3]
         # XXX: increase/decrease?
-        self.learning_rate = 0.001
+        self.learning_rate = 1e-6
         self.batch_size = 256
         self.l1_coef = 10.0
         self.k, _ = self.boxes.get_shape().as_list()
