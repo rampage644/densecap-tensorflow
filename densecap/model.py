@@ -275,6 +275,22 @@ class RegionProposalNetwork(object):
         self._build()
         self._create_loss()
         self._create_train()
+        self._create_summaries()
+
+    def _create_summaries(self):
+        tf.summary.scalar('loss', self.loss)
+
+        tf.contrib.layers.summaries.summarize_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+        tf.contrib.layers.summaries.summarize_activations()
+
+        tf.contrib.layers.summaries.summarize_tensor(self.iou_metric, 'iou_metric')
+        tf.contrib.layers.summaries.summarize_tensor(
+            tf.reduce_mean(tf.cast(self.iou_metric > 0.7, tf.float32)), 'iou_positive_rate')
+        tf.contrib.layers.summaries.summarize_tensor(
+            tf.reduce_mean(tf.cast(self.iou_metric < 0.3, tf.float32)), 'iou_negative_rate')
+        tf.contrib.layers.summaries.summarize_tensor(
+            tf.reduce_mean(tf.cast(self.cross_boundary_mask, tf.float32)), 'cross_rate'
+        )
 
     def _create_variables(self):
         self.image_height, self.image_width = tf.placeholder(tf.int32), tf.placeholder(tf.int32)
@@ -313,9 +329,10 @@ class RegionProposalNetwork(object):
             self.l1_coef * box_reg_loss / reg_num
         )
 
+        # XXX: move to dedicated method
         tf.summary.scalar('score_loss', score_loss)
         tf.summary.scalar('box_regression_loss', box_reg_loss)
-        tf.summary.scalar('loss', self.loss)
+
 
     def _create_train(self):
         # XXX: change to vanilla SGD?
