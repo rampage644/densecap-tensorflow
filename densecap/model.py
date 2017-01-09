@@ -206,6 +206,7 @@ def centerize_ground_truth(ground_truth_pre):
     return tf.stack([yc, xc, height, width], axis=1)
 
 
+# XXX: consider replacing with `tf.contrib.metrics.streaming_recall_at_thresholds`
 def recall(proposals, proposals_num, ground_truth, ground_truth_num, iou_threshold):
     '''Calculate recall with given IoU threshold
 
