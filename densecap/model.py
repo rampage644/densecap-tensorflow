@@ -278,7 +278,7 @@ class RegionProposalNetwork(object):
         self.input = vgg_conv_layer
         self.filters_num = 512
         self.ksize = [3, 3]
-        self.learning_rate = 1e-6
+        self.learning_rate = 1e-5
         self.batch_size = 256
         self.l1_coef = 10.0
         self.k, _ = self.boxes.get_shape().as_list()
@@ -334,7 +334,13 @@ class RegionProposalNetwork(object):
             predicted_scores, true_labels
         ))
 
-        box_reg_loss = 0
+        box_reg_loss = self._box_params_loss(
+            self.ground_truth,
+            self.ground_truth_num,
+            self.anchors,
+            self.offsets,
+            (self.image_height // 16) * (self.image_width // 16) * self.k
+        )
 
         reg_loss = sum(map(
             tf.reduce_sum,
@@ -344,8 +350,8 @@ class RegionProposalNetwork(object):
         reg_num = tf.cast((self.image_height // 16) * (self.image_width // 16), tf.float32)
         cls_num = tf.cast(self.batch_size, tf.float32)
         self.loss = (
-            score_loss / cls_num +
-            self.l1_coef * box_reg_loss / reg_num +
+            score_loss +
+            box_reg_loss +
             reg_loss
         )
 
