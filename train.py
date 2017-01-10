@@ -101,7 +101,7 @@ def main(_):
                         vgg16.input: [image],
                         rpn.image_height: height,
                         rpn.image_width: width,
-                        rpn.ground_truth: gt_boxes,
+                        rpn.ground_truth_pre: gt_boxes,
                         rpn.ground_truth_num: len(gt_boxes)
                     })
 
@@ -116,7 +116,7 @@ def main(_):
                         vgg16.input: [image],
                         rpn.image_height: height,
                         rpn.image_width: width,
-                        rpn.ground_truth: gt_boxes,
+                        rpn.ground_truth_pre: gt_boxes,
                         rpn.ground_truth_num: len(gt_boxes),
                         rpn.pos_boxes: p_bbox,
                         rpn.pos_scores: p_score,
