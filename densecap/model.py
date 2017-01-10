@@ -384,7 +384,7 @@ class RegionProposalNetwork(object):
         pos_batch, neg_batch = split_proposals(
             self.proposals, proposals_num,
             self.ground_truth, self.ground_truth_num,
-            self.iou_metric, self.scores, self.cross_boundary_mask, self.batch_size)
+            self.iou_metric, self.scores, self.cross_boundary_mask)
 
         self.positive_bbox, self.positive_scores, self.positive_labels = pos_batch
         self.negative_bbox, self.negative_scores, self.negative_labels = neg_batch
