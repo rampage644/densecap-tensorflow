@@ -78,6 +78,9 @@ def main(_):
     if not os.path.exists(FLAGS.ckpt_dir):
         os.makedirs(FLAGS.ckpt_dir)
 
+    @functools.lru_cache()
+    def get_data():
+        return list(train_data(FLAGS.region_desc, FLAGS.limit))
 
     with tf.Session() as sess:
         if saved_model:
@@ -88,7 +91,7 @@ def main(_):
             load_vgg16_weights(sess)
 
         for epoch in range(FLAGS.epoch):
-            for image, gt_boxes in train_data(FLAGS.region_desc, FLAGS.limit):
+            for image, gt_boxes in get_data():
                 height, width, _ = image.shape
                 merged = tf.summary.merge_all()
 
