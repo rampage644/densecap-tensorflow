@@ -114,7 +114,7 @@ def generate_proposals(coefficients, anchors):
     return proposals
 
 
-def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, cross_boundary_mask, batch_size):
+def split_proposals(proposals, proposals_num, gt, gt_num, iou, scores, cross_boundary_mask):
     '''Generate batches from proposals and ground truth boxes
 
     Idea is to drastically reduce number of proposals to evaluate. So, we find those
@@ -132,7 +132,6 @@ def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, cross_bo
     iou: N x M tensor of IoU between every proposal and ground truth
     scores: N x 2 tensor with scores object/not-object
     cross_boundary_mask: N x 1 Tensor masking out-of-image proposals
-    batch_size: Size of a batch to generate
     '''
     # now let's get rid of non-positive and non-negative samples
     # Sample is considered positive if it has IoU > 0.7 with _any_ ground truth box
@@ -146,44 +145,39 @@ def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, cross_bo
     # Select only positive boxes and their corresponding predicted scores
     positive_boxes = tf.boolean_mask(proposals, positive_mask)
     positive_scores = tf.boolean_mask(scores, positive_mask)
+    positive_labels = tf.reduce_mean(tf.ones_like(positive_scores), axis=1)
 
     # Same for negative
     negative_boxes = tf.boolean_mask(proposals, negative_mask)
     negative_scores = tf.boolean_mask(scores, negative_mask)
-
-    positive_labels = tf.reduce_mean(tf.ones_like(positive_scores), axis=1)
     negative_labels = tf.reduce_mean(tf.zeros_like(negative_scores), axis=1)
 
-    B = batch_size // 2
-    # pad positive samples with negative if there are not enough
-    # TODO: shuffle? random sampling?
-    # XXX: look at random_crop, random_shuffle
-    positive_boxes = tf.slice(
-        tf.concat(0, [positive_boxes, negative_boxes]), [0, 0], [B, -1],
-        name='pos_box_slice'
-    )
-    positive_predicted_scores = tf.slice(
-        tf.concat(0, [positive_scores, negative_scores]), [0, 0], [B, -1],
-        name='pos_score_slice'
-    )
-    positive_labels = tf.slice(
-        tf.concat(0, [positive_labels, negative_labels]), [0], [B],
-        name='true_score_slice'
+    return (
+        (positive_boxes, positive_scores, positive_labels),
+        (negative_boxes, negative_scores, negative_labels)
     )
 
-    negative_boxes = tf.slice(
-        negative_boxes, [0, 0], [B, -1], name='neg_box_slice'
-    )
-    negative_predicted_scores = tf.slice(
-        negative_scores, [0, 0], [B, -1], name='neg_score_slice'
-    )
-    negative_labels = tf.slice(
-        negative_labels, [0], [B]
-    )
+
+def generate_batches(positive_batch, negative_batch, batch_size):
+    positive_boxes, positive_scores, positive_labels = positive_batch
+    negative_boxes, negative_scores, negative_labels = negative_batch
+
+    half_batch = batch_size // 2
+
+    pos_batch = np.concatenate([positive_boxes, positive_scores, positive_labels], axis=1)
+    neg_batch = np.concatenate([negative_boxes, negative_scores, negative_labels], axis=1)
+
+    np.random.shuffle(pos_batch)
+    np.random.shuffle(neg_batch)
+
+    pos_batch = pos_batch[:half_batch]
+    pad_size = half_batch - len(pos_batch)
+    pos_batch = np.concatenate([pos_batch, neg_batch[:pad_size]])
+    neg_batch = neg_batch[pad_size:pad_size+half_batch]
 
     return (
-        (positive_boxes, positive_predicted_scores, positive_labels),
-        (negative_boxes, negative_predicted_scores, negative_labels)
+        np.split(pos_batch, [4, 6], axis=1),
+        np.split(neg_batch, [4, 6], axis=1)
     )
 
 
@@ -316,6 +310,14 @@ class RegionProposalNetwork(object):
         self.ground_truth_num = tf.placeholder(tf.int32)
         self.ground_truth_pre = tf.placeholder(tf.float32, [None, 4])
 
+        self.pos_boxes = tf.placeholder(tf.float32, [None, 4])
+        self.pos_scores = tf.placeholder(tf.float32, [None, 2])
+        self.true_pos_scores = tf.placeholder(tf.int32, [None])
+
+        self.neg_boxes = tf.placeholder(tf.float32, [None, 4])
+        self.neg_scores = tf.placeholder(tf.float32, [None, 2])
+        self.true_neg_scores = tf.placeholder(tf.int32, [None])
+
         self.boxes = tf.Variable([
             (45, 90), (90, 45), (64, 64),
             (90, 180), (180, 90), (128, 128),
@@ -332,13 +334,7 @@ class RegionProposalNetwork(object):
             predicted_scores, true_labels
         ))
 
-        box_reg_loss = self._box_params_loss(
-            self.ground_truth,
-            self.ground_truth_num,
-            self.anchors,
-            self.offsets,
-            (self.image_height // 16) * (self.image_width // 16) * self.k
-        )
+        box_reg_loss = 0
 
         reg_loss = sum(map(
             tf.reduce_sum,
@@ -385,14 +381,13 @@ class RegionProposalNetwork(object):
         self.iou_metric = iou(self.ground_truth, self.ground_truth_num,
                               self.proposals, proposals_num)
 
-        pos_batch, neg_batch = generate_batches(
+        pos_batch, neg_batch = split_proposals(
             self.proposals, proposals_num,
             self.ground_truth, self.ground_truth_num,
             self.iou_metric, self.scores, self.cross_boundary_mask, self.batch_size)
 
-        self.pos_boxes, self.pos_scores, self.true_pos_scores = pos_batch
-        self.neg_boxes, self.neg_scores, self.true_neg_scores = neg_batch
-
+        self.positive_bbox, self.positive_scores, self.positive_labels = pos_batch
+        self.negative_bbox, self.negative_scores, self.negative_labels = neg_batch
 
     def _box_params_loss(self, ground_truth, ground_truth_num,
                          anchor_centers, offsets, proposals_num):

@@ -112,75 +112,41 @@ def test_generate_proposals():
     ]))
 
 
-def test_generate_batches():
+def test_split_proposals():
     # 10 x 10 proposal locations, 100 x 100 pixels
     grid = np.dstack(np.meshgrid(10 * np.arange(10), 10 * np.arange(10)))
     boxes = np.tile(
         np.expand_dims(np.expand_dims(np.array([10, 10]), 0), 0),
         [10, 10, 1]
     )
-    proposals = np.reshape(np.concatenate([grid, boxes], axis=2), (-1, 4))
-    proposals_num = len(proposals)
-    scores = np.tile([-0.5, 0], [proposals_num, 1])
+    np_proposals = np.reshape(np.concatenate([grid, boxes], axis=2), (-1, 4))
+    np_proposals_num = len(np_proposals)
+    np_scores = np.tile([-0.5, 0], [np_proposals_num, 1])
     # okay, now we have 100 proposals. let's select some of them as ground truth
     # take 10 of them
-    ground_truth = proposals[::11]
-    scores[::11] *= -1
+    np_ground_truth = np_proposals[::11]
+    np_ground_truth_num = len(np_ground_truth)
+    np_scores[::11] *= -1
 
-    scores = tf.constant(scores, tf.float32)
-    proposals_num = tf.constant(proposals_num, tf.int32)
-    gt_num = tf.constant(len(ground_truth), tf.int32)
-    proposals = tf.constant(proposals, tf.float32)
-    ground_truth = tf.constant(ground_truth, tf.float32)
+    scores = tf.constant(np_scores, tf.float32)
+    proposals_num = tf.constant(np_proposals_num, tf.int32)
+    gt_num = tf.constant(len(np_ground_truth), tf.int32)
+    proposals = tf.constant(np_proposals, tf.float32)
+    ground_truth = tf.constant(np_ground_truth, tf.float32)
 
     iou = model.iou(ground_truth, gt_num, proposals, proposals_num)
     mask = tf.cast(tf.ones([proposals_num]), tf.bool)
     result = sess.run(
-        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, iou, scores, mask, 10))
+        model.split_proposals(proposals, proposals_num, ground_truth, gt_num, iou, scores, mask))
     (pos_boxes, pos_scores, pos_labels), (neg_boxes, neg_scores, neg_labels) = result
 
-    assert np.all(pos_boxes == np.array([
-        [0, 0, 10, 10],
-        [10, 10, 10, 10],
-        [20, 20, 10, 10],
-        [30, 30, 10, 10],
-        [40, 40, 10, 10]]
-    ))
-    assert np.all(pos_scores == np.array([[0.5, 0]] * 5))
-    assert np.all(pos_labels == np.array([1] * 5))
+    assert np.all(pos_boxes == np_ground_truth)
+    assert np.all(pos_scores == np.array([[0.5, 0]] * np_ground_truth_num))
+    assert np.all(pos_labels == np.array([1] * np_ground_truth_num))
 
-    assert np.all(neg_boxes == np.array([
-        [10, 0, 10, 10],
-        [20, 0, 10, 10],
-        [30, 0, 10, 10],
-        [40, 0, 10, 10],
-        [50, 0, 10, 10]
-    ]))
-    assert np.all(neg_scores == np.array([[-0.5, 0]] * 5))
-    assert np.all(neg_labels == np.array([0] * 5))
-
-    # now let's try to simulate negative padding, i.e. size of batch // 2 exceeds number
-    # of positive samples
-    result = sess.run(
-        model.generate_batches(proposals, proposals_num, ground_truth, gt_num, iou, scores, mask, 24))
-    (pos_boxes, pos_scores, pos_labels), (neg_boxes, neg_scores, neg_labels) = result
-
-    assert np.all(pos_boxes == np.array([
-        [0, 0, 10, 10],
-        [10, 10, 10, 10],
-        [20, 20, 10, 10],
-        [30, 30, 10, 10],
-        [40, 40, 10, 10],
-        [50, 50, 10, 10],
-        [60, 60, 10, 10],
-        [70, 70, 10, 10],
-        [80, 80, 10, 10],
-        [90, 90, 10, 10],
-        [10, 0, 10, 10],
-        [20, 0, 10, 10],
-    ]))
-    assert np.all(pos_scores == np.concatenate([np.array([[0.5, 0]] * 10), np.array([[-0.5, 0]] * 2)]))
-    assert np.all(pos_labels == np.concatenate([np.array([1] * 10), np.array([0] * 2)]))
+    assert len(neg_boxes) == (np_proposals_num - np_ground_truth_num)
+    assert np.all(neg_scores == np.array([[-0.5, 0]] * (np_proposals_num - np_ground_truth_num)))
+    assert np.all(neg_labels == np.array([0] * (np_proposals_num - np_ground_truth_num)))
 
 
 def test_cross_border_filter():
@@ -210,6 +176,57 @@ def test_cross_border_filter():
            (np_proposals[:, 0] + np_proposals[:, 2] <= 100) & \
            (np_proposals[:, 1] + np_proposals[:, 3] <= 100)
     assert np.all(np_proposals[mask] == fproposals)
+
+
+def test_generate_batches():
+    proposal_count = 10
+    batch_size = 5
+
+    pos_bbox_source = np.random.uniform(0, 1, size=(proposal_count, 4))
+    pos_score_source = np.random.uniform(0, 1, size=(proposal_count, 2))
+    pos_label_source = np.ones((proposal_count, 1))
+
+    neg_bbox_source = np.random.uniform(0, -1, size=(2 * proposal_count, 4))
+    neg_score_source = np.random.uniform(0, -1, size=(2 * proposal_count, 2))
+    neg_label_source = np.zeros((2 * proposal_count, 1))
+
+    result = model.generate_batches(
+        (pos_bbox_source, pos_score_source, pos_label_source),
+        (neg_bbox_source, neg_score_source, neg_label_source),
+        batch_size * 2
+    )
+    (pos_bbox, pos_score, pos_label), (neg_bbox, neg_score, neg_label) = result
+
+    assert pos_bbox.shape == (batch_size, 4)
+    assert pos_score.shape == (batch_size, 2)
+    assert pos_label.shape == (batch_size, 1)
+
+    assert neg_bbox.shape == (batch_size, 4)
+    assert neg_score.shape == (batch_size, 2)
+    assert neg_label.shape == (batch_size, 1)
+
+    assert np.all(pos_bbox >= 0.0)
+    assert np.all(pos_score >= 0.0)
+    assert np.all(pos_label == 1.0)
+
+    assert np.all(neg_bbox < 0.0)
+    assert np.all(neg_score < 0.0)
+    assert np.all(neg_label == 0.0)
+
+    batch_size = 12
+    result = model.generate_batches(
+        (pos_bbox_source, pos_score_source, pos_label_source),
+        (neg_bbox_source, neg_score_source, neg_label_source),
+        batch_size * 2
+    )
+    (pos_bbox, pos_score, pos_label), (neg_bbox, neg_score, neg_label) = result
+
+    assert pos_bbox.shape == (batch_size, 4)
+    assert neg_bbox.shape == (batch_size, 4)
+
+    print(pos_bbox)
+    assert np.any(pos_bbox > 0)
+    assert np.any(pos_bbox < 0)
 
 
 def test_centerize_ground_truth():
