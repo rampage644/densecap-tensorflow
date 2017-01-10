@@ -226,6 +226,25 @@ def recall(proposals, proposals_num, ground_truth, ground_truth_num, iou_thresho
     return true_positives / tf.cast(ground_truth_num, tf.float32)
 
 
+def precision(proposals, proposals_num, ground_truth, ground_truth_num, iou_threshold):
+    '''Calculate precision with given IoU threshold
+
+    proposals: N x 4 tensor (N x (y, x, h, w))
+    proposals_num: proposals count
+    ground_truth: M x 4 tensor (M x (y, x, h, w))
+    ground_truth_num: ground truth boxes count
+    iou_threshold: float in range [0; 1]
+
+    returns precision
+    '''
+    # shape is N x M
+    iou_metric = iou(ground_truth, ground_truth_num, proposals, proposals_num)
+    # shape is M x 1
+    true_positives = tf.reduce_sum(
+        tf.cast(tf.reduce_any(iou_metric >= iou_threshold, axis=1), tf.float32))
+    return true_positives / tf.cast(proposals_num, tf.float32)
+
+
 class VGG16(object):
     pools = [
         (2, 64),

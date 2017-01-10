@@ -130,16 +130,18 @@ def main(_):
                     proposals_num = tf.placeholder(tf.int32)
                     ground_truth_num = tf.placeholder(tf.int32)
 
-                    recall = sess.run(model.recall(
-                        proposals, proposals_num, ground_truth, ground_truth_num, 0.7), {
+                    recall, precision = sess.run(
+                        [model.recall(proposals, proposals_num, ground_truth, ground_truth_num, 0.5),
+                         model.precision(proposals, proposals_num, ground_truth, ground_truth_num, 0.5)], {
                             proposals: np_proposals,
-                            proposals_num: k,
+                            proposals_num: len(np_proposals),
                             ground_truth: gt_boxes,
                             ground_truth_num: len(gt_boxes)
                         })
 
                     summary = tf.Summary(value=[
                         tf.Summary.Value(tag='recall', simple_value=float(recall)),
+                        tf.Summary.Value(tag='precision', simple_value=float(precision)),
                     ])
                     writer.add_summary(summary, global_step=step)
 
