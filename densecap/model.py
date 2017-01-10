@@ -151,8 +151,8 @@ def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, cross_bo
     negative_boxes = tf.boolean_mask(proposals, negative_mask)
     negative_scores = tf.boolean_mask(scores, negative_mask)
 
-    true_positive_scores = tf.reduce_mean(tf.ones_like(positive_scores), axis=1)
-    true_negative_scores = tf.reduce_mean(tf.zeros_like(negative_scores), axis=1)
+    positive_labels = tf.reduce_mean(tf.ones_like(positive_scores), axis=1)
+    negative_labels = tf.reduce_mean(tf.zeros_like(negative_scores), axis=1)
 
     B = batch_size // 2
     # pad positive samples with negative if there are not enough
@@ -167,7 +167,7 @@ def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, cross_bo
         name='pos_score_slice'
     )
     positive_labels = tf.slice(
-        tf.concat(0, [true_positive_scores, true_negative_scores]), [0], [B],
+        tf.concat(0, [positive_labels, negative_labels]), [0], [B],
         name='true_score_slice'
     )
 
@@ -178,7 +178,7 @@ def generate_batches(proposals, proposals_num, gt, gt_num, iou, scores, cross_bo
         negative_scores, [0, 0], [B, -1], name='neg_score_slice'
     )
     negative_labels = tf.slice(
-        true_negative_scores, [0], [B]
+        negative_labels, [0], [B]
     )
 
     return (
