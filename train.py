@@ -5,6 +5,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import datetime
+import functools
 import os
 import json
 import gc
@@ -78,6 +79,9 @@ def main(_):
     if not os.path.exists(FLAGS.ckpt_dir):
         os.makedirs(FLAGS.ckpt_dir)
 
+    @functools.lru_cache()
+    def get_data():
+        return list(train_data(FLAGS.region_desc, FLAGS.limit))
 
     with tf.Session() as sess:
         if saved_model:
@@ -88,18 +92,40 @@ def main(_):
             load_vgg16_weights(sess)
 
         for epoch in range(FLAGS.epoch):
-            for image, gt_boxes in train_data(FLAGS.region_desc, FLAGS.limit):
+            for image, gt_boxes in get_data():
                 height, width, _ = image.shape
-                merged = tf.summary.merge_all()
 
-                loss, step, summary, _ = sess.run(
-                    [rpn.loss, rpn.global_step, merged, rpn.train_op], {
+                p_bbox, p_score, p_label, n_bbox, n_score, n_label = sess.run(
+                    [rpn.positive_bbox, rpn.positive_scores, rpn.positive_labels,
+                     rpn.negative_bbox, rpn.negative_scores, rpn.negative_labels], {
                         vgg16.input: [image],
                         rpn.image_height: height,
                         rpn.image_width: width,
-                        rpn.ground_truth: gt_boxes,
+                        rpn.ground_truth_pre: gt_boxes,
                         rpn.ground_truth_num: len(gt_boxes)
                     })
+
+                (p_bbox, p_score, p_label), (n_bbox, n_score, n_label) = model.generate_batches(
+                    (p_bbox, p_score, np.expand_dims(p_label, axis=1)),
+                    (n_bbox, n_score, np.expand_dims(n_label, axis=1)),
+                    rpn.batch_size
+                )
+
+                merged = tf.summary.merge_all()
+                loss, step, summary, _ = sess.run([rpn.loss, rpn.global_step, merged, rpn.train_op], {
+                        vgg16.input: [image],
+                        rpn.image_height: height,
+                        rpn.image_width: width,
+                        rpn.ground_truth_pre: gt_boxes,
+                        rpn.ground_truth_num: len(gt_boxes),
+                        rpn.pos_boxes: p_bbox,
+                        rpn.pos_scores: p_score,
+                        rpn.true_pos_scores: np.squeeze(p_label),
+                        rpn.neg_boxes: n_bbox,
+                        rpn.neg_scores: n_score,
+                        rpn.true_neg_scores: np.squeeze(n_label),
+                    })
+
 
                 writer.add_summary(summary, global_step=step)
 
@@ -116,7 +142,7 @@ def main(_):
                         global_step=rpn.global_step)
 
                 if not step % FLAGS.eval_every:
-                    k = 50
+                    k = 300
                     boxes, scores = sess.run(
                         [rpn.proposals, tf.nn.softmax(rpn.scores)], {
                             rpn.image_height: height,
@@ -130,16 +156,18 @@ def main(_):
                     proposals_num = tf.placeholder(tf.int32)
                     ground_truth_num = tf.placeholder(tf.int32)
 
-                    recall = sess.run(model.recall(
-                        proposals, proposals_num, ground_truth, ground_truth_num, 0.7), {
+                    recall, precision = sess.run(
+                        [model.recall(proposals, proposals_num, ground_truth, ground_truth_num, 0.5),
+                         model.precision(proposals, proposals_num, ground_truth, ground_truth_num, 0.5)], {
                             proposals: np_proposals,
-                            proposals_num: k,
+                            proposals_num: len(np_proposals),
                             ground_truth: gt_boxes,
                             ground_truth_num: len(gt_boxes)
                         })
 
                     summary = tf.Summary(value=[
                         tf.Summary.Value(tag='recall', simple_value=float(recall)),
+                        tf.Summary.Value(tag='precision', simple_value=float(precision)),
                     ])
                     writer.add_summary(summary, global_step=step)
 

@@ -44,19 +44,21 @@ def main(_):
         k = FLAGS.proposals
         image = scipy.misc.imread(FLAGS.image, mode='RGB')
         height, width, _ = image.shape
+        fraction = 720.0 / max(height, width)
+        image = scipy.misc.imresize(image, fraction)
+        height, width, _ = image.shape
 
-        proposals = tf.reshape(rpn.offsets, [-1, 4])
         boxes, scores = sess.run(
-            [proposals, rpn.scores], {
-                rpn.H: height,
-                rpn.W: width,
+            [rpn.proposals, tf.nn.softmax(rpn.scores)], {
+                rpn.image_height: height,
+                rpn.image_width: width,
                 vgg16.input: [image]
             })
         proposals = np.squeeze(boxes[np.argsort(scores[:, 1])][-k:])
 
         # [y_min, x_min, y_max, x_max]
         # floats 0.0 - 1.0
-        xmin, ymin, w, h = np.split(proposals, 4, axis=1)
+        ymin, xmin, h, w = np.split(proposals, 4, axis=1)
 
         xmax, ymax = xmin + w, ymin + h
         xmin, xmax, ymin, ymax = xmin / w, xmax / w, ymin / h, ymax / h
